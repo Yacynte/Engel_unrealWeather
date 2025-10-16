@@ -10,7 +10,7 @@ class AMyActor_weather; // Forward declare
 //class ACharacter; // Forward declare ACharacter
 //class UNiagaraComponent; // Forward declare NiagaraComponent
 UCLASS()
-class ENGELWEATHERUE5__API AMyActor_controllingWeather : public AActor
+class CITYSAMPLE_API AMyActor_controllingWeather : public AActor
 {
 	GENERATED_BODY()
 	
@@ -36,7 +36,7 @@ private:
 	float rainRate = 500.0f ; // cm/s
 	float snowRate = 100.0f ;   // cm/s
 	float timediff = 0.0f ;
-	float frameRate = 20.0f;
+	float frameRate = 10.0f;
 	bool WaitingForDestination = false; // Flag to check if waiting for destination
 
 };

@@ -33,11 +33,12 @@ void AMyActor_controllingWeather::BeginPlay()
         {
             UE_LOG(LogTemp, Error, TEXT("Failed to cast found actor to AMyActor_Weather!"));
         }
+        UE_LOG(LogTemp, Log, TEXT("Cast found actor to AMyActor_Weather!"));
     }
     else
     {
         //UE_WARNING_LOG(LogTemp, TEXT("No AMyActor_Weather found in the level!"));
-        UE_LOG(LogTemp, Warning, TEXT("No AMyActor_Weather found in the level!"));
+        UE_LOG(LogTemp, Error, TEXT("No AMyActor_Weather found in the level!"));
     }
 
     // Example: Activate rain after 5 seconds in BeginPlay
@@ -46,6 +47,7 @@ void AMyActor_controllingWeather::BeginPlay()
     // Example: Start a timer to toggle rain every 10 seconds after 5 seconds initial delay
     if (WeatherManager) // Only set timer if we found the weather manager
     {
+        WeatherManager->InitializeEngel();
         //SetRainRate(rainSpawnRate);
         //FVector ForwardDirection = PlayerCharacter->GetActorForwardVector();
         //MoveObject(FVector::ForwardVector, 1.0f);
@@ -71,7 +73,7 @@ void AMyActor_controllingWeather::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
     timediff += DeltaTime;
-    if (timediff >= 10 && timediff < 10 + DeltaTime) {
+    if (timediff >= 20 && timediff < 20 + DeltaTime) {
         WeatherManager->StartSnow(snowRate);
         WeatherManager->StopRain();
         //WeatherManager->MoveForwardForDistance(400.0f, 20.0f);

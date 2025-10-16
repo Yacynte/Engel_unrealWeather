@@ -66,6 +66,12 @@ public:
 
 	void CaptureAndSaveImage();
 
+	void SaveActiveCameraImage();
+
+	void setCaptueCamera();
+
+	void InitializeEngel();
+
 	void setCaptueCompParam();
 
 	UFUNCTION(BlueprintCallable, Category = "Weather")
@@ -118,5 +124,6 @@ private:
 	float TimeSinceLastCapture = 0.0f;
 	float CaptureInterval; // 20 fps = 0.05 seconds
 	FString ScreenshotPath;
+	FString ScreenshotPath_camera;
 
 };

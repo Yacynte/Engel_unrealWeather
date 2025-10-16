@@ -32,9 +32,25 @@ void AMyActor_weather::BeginPlay()
 		}
 	}
 	*/
-	TargetThirdPersonCharacter = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0); // Get the first player character
-	setCaptueCompParam();
+	InitializeEngel();
 
+}
+
+void AMyActor_weather::InitializeEngel()
+{
+	TargetThirdPersonCharacter = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0); // Get the first player character
+
+	if (!TargetThirdPersonCharacter)
+	{
+		TargetThirdPersonCharacter = UGameplayStatics::GetPlayerCharacter(this, 0);
+		if (!TargetThirdPersonCharacter)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("MyActor_weather: Could not find player character automatically. Please set TargetThirdPersonCharacter in editor."));
+		}
+	}
+
+	setCaptueCompParam();
+	setCaptueCamera();
 }
 
 // Called every frame
@@ -49,6 +65,7 @@ void AMyActor_weather::Tick(float DeltaTime)
 		TimeSinceLastCapture += DeltaTime;
 		if (TimeSinceLastCapture >= CaptureInterval) {
 			CaptureAndSaveImage();
+			SaveActiveCameraImage();
 			TimeSinceLastCapture = 0.0f; // reset timer
 		}
 	}
@@ -243,7 +260,7 @@ void AMyActor_weather::MoveObj(float DeltaTime)
 
 void AMyActor_weather::RotateObj(float DeltaTime)
 {
-	UE_LOG(LogTemp, Log, TEXT("Rotate camera!"));
+	//UE_LOG(LogTemp, Log, TEXT("Rotate camera!"));
 	FRotator CurrentRotator = TargetThirdPersonCharacter->GetActorRotation();
 
 	float AngularStep = AngularSpeed * DeltaTime;
@@ -285,26 +302,21 @@ void AMyActor_weather::setCaptueCompParam()
 		UE_LOG(LogTemp, Error, TEXT("Capture or TextureTarget is null"));
 		return;
 	}
-
-	//Capture->CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;
-	//Capture->ShowFlags.SetPostProcessing(false);
-	//Capture->ShowFlags.SetEyeAdaptation(true);
-
-	Capture->PostProcessSettings.bOverride_AutoExposureMethod = true;
-	Capture->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
-	Capture->PostProcessSettings.bOverride_AutoExposureBias = true;
-	Capture->PostProcessSettings.AutoExposureBias = 2.0f;
-
-	//RootComponent = Capture; // Make it the root, or attach to another component
-
-	// Configure the Scene Capture Component
-	Capture->bCaptureEveryFrame = false; // We will manually trigger captures
-	//Capture->bAlwaysPersistRenderingState = true;
-	// Capture->CaptureSource = ESceneCaptureSource::SCS_SceneColorHDR; // Or SCS_FinalColorLDR for typical image
-	Capture->CompositeMode = ESceneCaptureCompositeMode::SCCM_Overwrite; // Overwrite previous frame
-	//Capture->CaptureSource = ESceneCaptureSource::SCS_FinalPostProcessToneMapped;
 }
 
+void AMyActor_weather::setCaptueCamera() {
+
+	APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+	if (PC && PC->PlayerCameraManager)
+	{
+		FVector CamLoc = PC->PlayerCameraManager->GetCameraLocation();
+		FRotator CamRot = PC->PlayerCameraManager->GetCameraRotation();
+
+		UE_LOG(LogTemp, Log, TEXT("Active Camera Location: %s, Rotation: %s"),
+			*CamLoc.ToString(), *CamRot.ToString());
+	}
+
+}
 
 
 void AMyActor_weather::CaptureAndSaveImage()
@@ -352,6 +364,7 @@ void AMyActor_weather::CaptureAndSaveImage()
 void AMyActor_weather::StartCapture( float frameRate_)
 {
 	// Start capturing images at a targeted frame rate
+
 	if (!TargetThirdPersonCharacter) return;
 	//USceneCaptureComponent2D* Capture = TargetThirdPersonCharacter->FindComponentByClass<USceneCaptureComponent2D>();
 	if (!Capture || !Capture->TextureTarget) {
@@ -360,11 +373,13 @@ void AMyActor_weather::StartCapture( float frameRate_)
 		return;
 	}
 	ScreenshotPath = FPaths::ProjectSavedDir() + "/recodings_" + FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"))+"/";
+	ScreenshotPath_camera = FPaths::ProjectSavedDir() + "/recodings_camera_" + FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S")) + "/";
 	IFileManager::Get().MakeDirectory(*ScreenshotPath, true);
 	CaptureInterval = 1 / frameRate_;
 	startCapture = true;
 	TimeSinceLastCapture = 0.0f; // Reset timer
 	UE_LOG(LogTemp, Log, TEXT("Started capturing images at frequency of %0.2f fps and saving in %s"), 1 / CaptureInterval, *ScreenshotPath);
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("Started capturing images "));
 }
 
 void AMyActor_weather::StopCapture()
@@ -381,6 +396,7 @@ void AMyActor_weather::StartRain( float Rainrate, FVector WindSpeed )
 	// Start the rain effect with specified parameters
 	// Rainrate: Rate of rain spawn in cm/s
 	// WindSpeed: Direction of wind that affects rain fall in cm/s
+
 	UNiagaraComponent* RainComp = GetRainComponent();
 	if (!RainComp)
 	{
@@ -419,6 +435,10 @@ void AMyActor_weather::StartSnow(float SnowRate, FVector WindSpeed )
 	// Start the snow effect with specified parameters
 	// SnowRate: Rate of snow spawn in cm/s
 	// WindSpeed: Direction of wind that affects snow fall in cm/s
+	if (!TargetThirdPersonCharacter)
+	{
+		TargetThirdPersonCharacter = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
+	}
 	UNiagaraComponent* SnowComp = GetSnowComponent();
 	if (!SnowComp)
 	{
@@ -449,4 +469,35 @@ void AMyActor_weather::StopSnow()
 	DeactivateSnow();
 	UE_LOG(LogTemp, Log, TEXT("Stopping snow..."));
 	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Snow activated from script"));
+}
+
+
+void AMyActor_weather::SaveActiveCameraImage()
+{
+	if (!GEngine || !GEngine->GameViewport) return;
+
+	FViewport* Viewport = GEngine->GameViewport->Viewport;
+	if (!Viewport) return;
+
+	TArray<FColor> Bitmap;
+	if (Viewport->ReadPixels(Bitmap))
+	{
+		int32 Width = Viewport->GetSizeXY().X;
+		int32 Height = Viewport->GetSizeXY().Y;
+
+		FString FilePath = FPaths::ProjectSavedDir() / TEXT("ActiveCamera.png");
+		//FIntRect Rect(0, 0, Width, Height);
+
+		//FHighResScreenshotConfig& ScreenshotConfig = GetHighResScreenshotConfig();
+		//ScreenshotConfig.SaveImage(FilePath, Bitmap, Rect);
+
+		//UE_LOG(LogTemp, Log, TEXT("Saved image from active camera to %s"), *FilePath);
+
+		FString Filename = ScreenshotPath_camera + "Capture_" + FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S")) + ".png";
+
+		// Save the image
+		TArray<uint8> PNGData;
+		FImageUtils::CompressImageArray(Width, Height, Bitmap, PNGData);
+		FFileHelper::SaveArrayToFile(PNGData, *Filename);
+	}
 }

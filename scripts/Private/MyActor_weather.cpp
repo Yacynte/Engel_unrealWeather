@@ -63,10 +63,15 @@ void AMyActor_weather::Tick(float DeltaTime)
 	}
 	if (startCapture) {
 		TimeSinceLastCapture += DeltaTime;
+		TimeSinceLastCapturestream += DeltaTime;
 		if (TimeSinceLastCapture >= CaptureInterval) {
-			CaptureAndSaveImage();
+			// CaptureAndSaveImage();
 			SaveActiveCameraImage();
 			TimeSinceLastCapture = 0.0f; // reset timer
+		}
+		if (TimeSinceLastCapturestream >= streamInterval) {
+			StreamImages();
+			TimeSinceLastCapturestream = 0.0f; // reset timer
 		}
 	}
 	if (RotateCamera) {
@@ -246,7 +251,7 @@ void AMyActor_weather::MoveObj(float DeltaTime)
 	float Step = MoveSpeed * DeltaTime;
 	FVector NewLocation = CurrentLocation + Direction * Step;
 
-	// Stop if we’re close enough or overshot
+	// Stop if weï¿½re close enough or overshot
 	if (FVector::DistSquared(NewLocation, StartLocation) >= FVector::DistSquared(TargetLocation, StartLocation))
 	{
 		NewLocation = TargetLocation;
@@ -278,7 +283,7 @@ void AMyActor_weather::RotateObj(float DeltaTime)
 		NewRotator.Yaw = CurrentRotator.Yaw + AngularStep;
 	}
 
-	// Stop if we’re close enough or overshot
+	// Stop if weï¿½re close enough or overshot
 	if (NewRotator.GetManhattanDistance(StartRotator) >= TargetRotator.GetManhattanDistance(StartRotator))
 	{
 		NewRotator = TargetRotator;
@@ -499,5 +504,47 @@ void AMyActor_weather::SaveActiveCameraImage()
 		TArray<uint8> PNGData;
 		FImageUtils::CompressImageArray(Width, Height, Bitmap, PNGData);
 		FFileHelper::SaveArrayToFile(PNGData, *Filename);
+	}
+}
+
+
+void AMyActor_weather::StartStreamRTSP(FString ServerURL = TEXT("rtsp://127.0.0.1:8554/mystream"), int32 streamFrameRate_ = 30)
+{
+	streamFrameRate = streamFrameRate_;
+	streamInterval = 1.0f / streamFrameRate;
+	bIsStreaming = true;
+	UE_LOG(LogTemp, Log, TEXT("Initialized RTSP streaming at %.2f fps"), streamFrameRate);
+}
+
+void AMyActor_weather::StreamImages()
+{
+	if (!GEngine || !GEngine->GameViewport) return;
+
+	FViewport* Viewport = GEngine->GameViewport->Viewport;
+	if (!Viewport) return;
+
+	streamInterval = 1.0f / InFPS;
+	TArray<FColor> Bitmap;
+	// This is the heavy operation. Since you prefer this over SceneCapture,
+	// expect a frame drop here, but the visual quality will be perfect.
+	if (Viewport->ReadPixels(Bitmap))
+	{
+		int32 Width = Viewport->GetSizeXY().X;
+		int32 Height = Viewport->GetSizeXY().Y;
+
+		// 1. Initialize Stream if not running
+		// Ensure you have an RTSP server running (like MediaMTX)
+		if (!Streamer.IsStreaming())
+		{
+			// FString ServerURL = TEXT("rtsp://127.0.0.1:8554/mystream");
+			Streamer.StartStream(Width, Height, InFPS, ServerURL);
+		}
+
+		// 2. Send the Raw Data
+		// IMPORTANT: Do NOT compress to PNG first. Send raw FColors.
+		Streamer.SendFrame(Bitmap);
+		
+		// If you still need the file saved to disk occasionally, 
+		// you can keep your old PNG saving logic here, but don't do it every frame.
 	}
 }

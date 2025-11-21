@@ -57,6 +57,7 @@ void AMyActor_controllingWeather::BeginPlay()
         //GetWorldTimerManager().SetTimer(MoveToggleTimerHandle, this, &AMyActor_controllingWeather::MoveObject, 10.0f, true, 5.0f);
 		WeatherManager->StartRain(rainRate); // Start rain with precipitation rate
         WeatherManager->StartCapture( frameRate);
+        WeatherManager->StartStreamRTSP();
         WeatherManager->MoveForwardForDistance(400.0f, 20.0f);
        
 		//WeatherManager->StopRain(); // Stop rain

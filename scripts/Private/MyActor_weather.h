@@ -10,9 +10,9 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "RTSPStreamer.h" 
 #include "MyActor_weather.generated.h"
 
-#include "RTSPStreamer.h" // Include the new file
 //#include<iomanip>
 
 class ACharacter; // Forward declare ACharacter
@@ -23,7 +23,10 @@ UCLASS()
 class AMyActor_weather : public AActor
 {
 	GENERATED_BODY()
-
+	
+public:	
+	// Sets default values for this actor's properties
+	AMyActor_weather();
 
 protected:
 	// Called when the game starts or when spawned
@@ -31,8 +34,6 @@ protected:
 
 
 public:	
-	// Sets default values for this actor's properties
-	AMyActor_weather();
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
@@ -119,21 +120,28 @@ public:
 
 	void StopCapture();
 
-	void StartStreamRTSP(FString ServerURL = TEXT("rtsp://127.0.0.1:8554/mystream"), int32 InFPS = 30);
+	void StartStreamRTSP( float InFPS = 30, FString ServerURL = TEXT("rtsp://localhost:8554/mystream"));
 
-	void StopStreamRTSP();
+	void StreamRTSP();
+
+	//void StopStreamRTSP();
 	// Helper function to move the Camera Component
 	//void MoveObject();
 
 private:
 	float TimeSinceLastCapture = 0.0f;
-	float TimeSinceLastCapturestream = 0.0f;
-	float streamFrameRate = 30.0f;
-	float streamInterval = 1.0f / 30.0f;
 	float CaptureInterval; // 20 fps = 0.05 seconds
 	FString ScreenshotPath;
 	FString ScreenshotPath_camera;
+	bool startcaptureCalled = false;
+	float frameRate;
 	FRTSPStreamer Streamer;
-	bool bIsStreaming = false;
+	float StreamInterval;
+	bool startStream = false;
+	bool startStreamCalled = false;
+	float TimeSinceLastImgStream = 0.0f;
+	float streamRate;
+	FString streamAddress;
+
 
 };

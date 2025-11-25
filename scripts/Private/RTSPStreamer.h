@@ -2,6 +2,9 @@
 
 #include "CoreMinimal.h"
 #include <stdio.h>
+#include "Misc/Paths.h"
+#include "HAL/PlatformProcess.h"
+
 
 class FRTSPStreamer
 {
@@ -13,7 +16,7 @@ public:
 	bool StartStream(int32 InWidth, int32 InHeight, int32 InFPS, FString RTSPURL);
 
 	// Push raw FColor data to FFmpeg
-	void SendFrame(const TArray<FColor>& Bitmap);
+	void SendFrame( const TArray<FColor>& Bitmap);
 
 	// Kill the process
 	void StopStream();
@@ -21,8 +24,11 @@ public:
 	bool IsStreaming() const { return bIsStreaming; }
 
 private:
-	FILE* PipeHandle;
 	int32 Width;
 	int32 Height;
 	bool bIsStreaming;
+	// Member variables needed for the class:
+	 FProcHandle FFmpegProcessHandle;
+	 void* PipeWriteChild;
+	 void* PipeWriteParent;
 };

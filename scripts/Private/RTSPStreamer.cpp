@@ -12,89 +12,72 @@ FRTSPStreamer::~FRTSPStreamer()
 
 bool FRTSPStreamer::StartStream(int32 InWidth, int32 InHeight, int32 InFPS, FString RTSPURL)
 {
-	if (bIsStreaming) return true;
+    if (bIsStreaming) return true;
 
-	Width = InWidth;
-	Height = InHeight;
+    Width = InWidth;
+    Height = InHeight;
 
-	// --- THE FFMPEG COMMAND ---
-	// MediaMTX requires proper PUSH mode.
-	// This ffmpeg command uses the correct RTSP publish dialect:
-	// -re : pace frames; without this MediaMTX often rejects publish
-	// -rtsp_transport tcp : stable
-	// -g 12 : keyframe interval (mandatory or VLC won't open the stream)
-	// -tune zerolatency : no buffering
-	//
-	// Dynamically construct the path relative to the project root
-	//FString FFmpegPath = TEXT("C:/Users/Batchaya/AppData/Local/ffmpeg/ffmpeg-8.0.1-full_build/bin/ffmpeg.exe");
+    FString FFmpegPath = TEXT("C:/Users/Batchaya/AppData/Local/ffmpeg/ffmpeg-8.0.1-full_build/bin/ffmpeg.exe");
 
-	FString FFmpegPath = TEXT("C:/Users/Batchaya/AppData/Local/ffmpeg/ffmpeg-8.0.1-full_build/bin/ffmpeg.exe");
+    // IMPORTANT: Input is now rawvideo from STDIN ("-i -")
+    FString Args = FString::Printf(
+        TEXT("-re -f rawvideo -pix_fmt bgra -s %dx%d -r %d -i tcp://127.0.0.1:9000 -c:v libx264 -preset ultrafast -tune zerolatency -f rtsp -rtsp_transport tcp %s"),
+        Width,
+        Height,
+        InFPS,
+        *RTSPURL
+    );
 
-	// Arguments: everything *after* the executable path, and without quotes.
-	FString Args = FString::Printf(
-		TEXT("-re -f lavfi -i testsrc=size=%dx%d:rate=%d -c:v libx264 -preset ultrafast -tune zerolatency -rtsp_transport tcp -f rtsp %s"),
-		Width,
-		Height,
-		InFPS,
-		*RTSPURL
-	);
+    // Create STDIN pipe for FFmpeg
+    // FPlatformProcess::CreatePipe(PipeReadChild, PipeWriteChild);
 
-	//  Create the Pipe for Communication (Crucial step)
-	// This creates two ends: one for the parent (Unreal) to write, one for the child (FFmpeg) to read.
-	FPlatformProcess::CreatePipe(PipeWriteChild, PipeWriteParent);
+    // Start FFmpeg with child STDIN bound to PipeWriteChild
+    FFmpegProcessHandle = FPlatformProcess::CreateProc(
+        *FFmpegPath,
+        *Args,
+        true,   // detached
+        true,   // hidden
+        true,   // launch hidden window
+        nullptr,
+        0,
+        nullptr,
+        nullptr,   // Child STDIN
+        nullptr          // Child STDOUT (optional)
+    );
 
-	// 4. Launch the Process
-	FFmpegProcessHandle = FPlatformProcess::CreateProc(
-		*FFmpegPath,        // Executable Path
-		*Args,              // Arguments
-		true,               // bLaunchDetached (Runs in background)
-		true,               // bLaunchHidden (No console window)
-		true,               // bLaunchReallyHidden
-		nullptr,            // Process ID
-		0,                  // Priority
-		nullptr,            // Working Directory
-		PipeWriteChild      // Pipe for child process (FFmpeg) to read from
-	);
+    if (!FFmpegProcessHandle.IsValid())
+    {
+        FPlatformProcess::ClosePipe(PipeWriteChild, PipeReadChild);
+        UE_LOG(LogTemp, Error, TEXT("RTSP: Failed to launch FFmpeg."));
+        return false;
+    }
 
-	if (!FFmpegProcessHandle.IsValid())
-	{
-		// Store this handle if you need to terminate the stream later!
-		/*bIsStreaming = true;
-		UE_LOG(LogTemp, Log, TEXT("RTSP: FFmpeg launched asynchronously."));*/
-		FPlatformProcess::ClosePipe(PipeWriteChild, PipeWriteParent);
-		UE_LOG(LogTemp, Error, TEXT("RTSP: Failed to launch FFmpeg process."));
-		return false;
-	}
+    // Parent does not use child end
+     //FPlatformProcess::ClosePipe(PipeWriteChild, nullptr);
 
-	// Launch succeeded, but the parent(Unreal) doesn't need to write to the child's end.
-	// Close the child handle in the parent process's memory space immediately.
-	FPlatformProcess::ClosePipe(PipeWriteChild, nullptr);
+    bIsStreaming = true;
+    UE_LOG(LogTemp, Log, TEXT("RTSP: Streaming started to %s"), *RTSPURL);
 
-	bIsStreaming = true;
-	// Close the child end of the pipe as the parent process won't use it.
-	//FPlatformProcess::ClosePipe(PipeWriteChild, PipeWriteParent);
-	UE_LOG(LogTemp, Log, TEXT("RTSP: Streaming started to %s"), *RTSPURL);
-	//UE_LOG(LogTemp, Log, TEXT("RTSP: Streaming command was %s"), *Command);
-	return true;
+    return true;
 }
 
-void FRTSPStreamer::SendFrame(TArray<FColor> Bitmap)
+
+void FRTSPStreamer::SendFrame(const TArray<FColor>& Bitmap)
 {
-	// Check if the stream is active and the parent pipe handle is valid
-	if (!bIsStreaming || !PipeWriteParent) return;
+    if (FFmpegProcessHandle.IsValid())
+    {
+        if (!bIsStreaming || !PipeReadChild) return;
+        if (Bitmap.Num() != Width * Height) return;
 
-	// Sanity check data size
-	if (Bitmap.Num() != Width * Height) return;
+        // BGRA8 is exactly what FColor uses
+        const uint8* RawData = reinterpret_cast<const uint8*>(Bitmap.GetData());
+        const int32 DataSize = Width * Height * 4; // 4 bytes per pixel (BGRA)
 
-	// 1. Calculate total size in bytes
-	const int32 DataSize = Bitmap.Num() * sizeof(FColor);
-
-	// 2. Write raw memory to the pipe
-	// Note: FPlatformProcess::WritePipe handles the flushing automatically.
-	FPlatformProcess::WritePipe(PipeWriteParent, (const uint8*)Bitmap.GetData(), DataSize);
-	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, TEXT("Add image to stream"));
-	// No need for fflush() here; the engine handles buffering and flushing for you.
+        FPlatformProcess::WritePipe(PipeReadChild, RawData, DataSize);
+        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, TEXT("Add image to stream"));
+    }
 }
+
 
 void FRTSPStreamer::StopStream()
 {
@@ -107,11 +90,100 @@ void FRTSPStreamer::StopStream()
 		FPlatformProcess::CloseProc(FFmpegProcessHandle);
 
 		// 3. Close the parent end of the pipe
-		FPlatformProcess::ClosePipe(PipeWriteParent, PipeWriteChild);
+		FPlatformProcess::ClosePipe(PipeReadChild, PipeWriteChild);
 
 		FFmpegProcessHandle.Reset();
 		bIsStreaming = false;
 
 		UE_LOG(LogTemp, Log, TEXT("RTSP: FFmpeg process terminated successfully."));
 	}
+}
+
+void FRTSPStreamer::SendFrameTCP(const TArray<FColor>& Bitmap)
+{
+    if (!ClientSocket) {
+        // No client connected yet → just skip sending this frame
+        return;
+    }
+    if (!bIsStreaming) { return; }
+    int32 BytesSent = 0;
+    int32 TotalSize = Width * Height * 4;
+
+    const uint8* RawBGRA = reinterpret_cast<const uint8*>(Bitmap.GetData());
+
+    // Keep sending until all bytes are pushed
+    while (BytesSent < TotalSize)
+    {
+        int32 SentNow = 0;
+        ClientSocket->Send(RawBGRA + BytesSent, TotalSize - BytesSent, SentNow);
+        if (SentNow <= 0)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Socket send failed."));
+            if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Socket send failed."));
+            break;
+        }
+        BytesSent += SentNow;
+    }
+    if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, TEXT("Add image to stream"));
+}
+
+bool FRTSPStreamer::ConnectToFFmpeg()
+{
+    ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+
+    Socket = SocketSubsystem->CreateSocket(NAME_Stream, TEXT("FFmpegStream"), false);
+
+    FIPv4Address IpAddress;
+    FIPv4Address::Parse(ip_address, IpAddress);
+
+    TSharedRef<FInternetAddr> Addr = SocketSubsystem->CreateInternetAddr();
+    Addr->SetIp(IpAddress.Value);
+    Addr->SetPort(9000);
+
+    // 4MB buffer to avoid blocking
+    int32 NewSize = 0;
+    Socket->SetReceiveBufferSize(4 * 1024 * 1024, NewSize);
+    Socket->SetSendBufferSize(4 * 1024 * 1024, NewSize);
+
+    return Socket->Connect(*Addr);
+}
+
+bool FRTSPStreamer::StartTCPServer(int32 InWidth, int32 InHeight )
+{
+    Height = InHeight;
+    Width = InWidth;
+    if (bIsStreaming) { return true; }
+    ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+
+    ListenSocket = SocketSubsystem->CreateSocket(NAME_Stream, TEXT("FFmpegStreamSocket"), false);
+    if (!ListenSocket) return false;
+
+    int32 Port = 9000;
+
+    FIPv4Address Addr;
+    FIPv4Address::Parse(ip_address, Addr);
+
+    TSharedRef<FInternetAddr> InternetAddr = SocketSubsystem->CreateInternetAddr();
+    InternetAddr->SetIp(Addr.Value);
+    InternetAddr->SetPort(Port);
+
+    // Bind
+    if (!ListenSocket->Bind(*InternetAddr))
+    {
+        UE_LOG(LogTemp, Error, TEXT("Bind failed."));
+        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Bind failed."));
+        return false;
+    }
+
+    // Listen
+    if (!ListenSocket->Listen(1))
+    {
+        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Listening failed."));
+        return false;
+    }
+
+    // Accept connection in async thread
+    (new FAutoDeleteAsyncTask<FAcceptTask>(this))->StartBackgroundTask();
+    bIsStreaming = true;
+    return true;
 }

@@ -4,7 +4,7 @@ Let unreal project name be `EngelProject`
 
 1.  add these `module names` to `EngelProject.Build.cs` found in `EngelProject/Source/EngelProject`
 
-    PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "RenderCore", "RHI", "Niagara" });
+    PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "RenderCore", "RHI", "Niagara", "Networking", "Sockets" });
 
 If the file do not exist, add `Visual Studio` option to your project
 

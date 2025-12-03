@@ -3,7 +3,12 @@
 #include "CoreMinimal.h"
 #include <stdio.h>
 #include "Misc/Paths.h"
+#include "ImageUtils.h"
 #include "HAL/PlatformProcess.h"
+#include "Networking.h"
+#include "Sockets.h"
+#include "SocketSubsystem.h"
+
 
 
 class FRTSPStreamer
@@ -23,12 +28,52 @@ public:
 
 	bool IsStreaming() const { return bIsStreaming; }
 
+	bool ConnectToFFmpeg();
+
+	void SendFrameTCP(const TArray<FColor>& Bitmap);
+	
+	bool StartTCPServer(int32 InWidth, int32 InHeight);
+	FSocket* ListenSocket = nullptr;
+	FSocket* ClientSocket = nullptr;
+	
+
 private:
 	int32 Width;
 	int32 Height;
-	bool bIsStreaming;
+	bool bIsStreaming = false ;
 	// Member variables needed for the class:
 	 FProcHandle FFmpegProcessHandle;
 	 void* PipeWriteChild;
-	 void* PipeWriteParent;
+	 void* PipeReadChild;
+	 FSocket* Socket = nullptr;
+	 FString ip_address = TEXT("127.0.0.1");
+};
+
+
+class FAcceptTask : public FNonAbandonableTask
+{
+public:
+	FRTSPStreamer* Streamer;
+
+	FAcceptTask(FRTSPStreamer* InStreamer) : Streamer(InStreamer) {}
+
+	void DoWork()
+	{
+		bool Pending;
+		while (true)
+		{
+			if (Streamer->ListenSocket->HasPendingConnection(Pending) && Pending)
+			{
+				Streamer->ClientSocket = Streamer->ListenSocket->Accept(TEXT("FFmpegClient"));
+				if (Streamer->ClientSocket)
+				{
+					UE_LOG(LogTemp, Log, TEXT("FFmpeg connected!"));
+				}
+				return;
+			}
+			FPlatformProcess::Sleep(0.01f);
+		}
+	}
+
+	FORCEINLINE TStatId GetStatId() const { RETURN_QUICK_DECLARE_CYCLE_STAT(FAcceptTask, STATGROUP_ThreadPoolAsyncTasks); }
 };

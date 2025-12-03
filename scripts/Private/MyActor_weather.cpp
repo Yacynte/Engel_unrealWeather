@@ -78,8 +78,8 @@ void AMyActor_weather::Tick(float DeltaTime)
 	}
 
 	if (startStream) {
-		TimeSinceLastCapture += DeltaTime;
-		if (TimeSinceLastCapture >= StreamInterval) {
+		TimeSinceLastImgStream += DeltaTime;
+		if (TimeSinceLastImgStream >= StreamInterval) {
 			StreamRTSP();
 			TimeSinceLastImgStream = 0.0f; // reset stream timer
 		}
@@ -416,7 +416,12 @@ void AMyActor_weather::StartStreamRTSP(float InFPS, FString ServerURL)
 	// Start streaming at a targeted frame rate
 	StreamInterval = 1 / InFPS;
 	streamRate = InFPS;
-	startStream = true;
+	FViewport* Viewport = GEngine->GameViewport->Viewport;
+	if (!Viewport) return;
+	int32 Width = Viewport->GetSizeXY().X;
+	int32 Height = Viewport->GetSizeXY().Y;
+	startStream = Streamer.StartTCPServer(Width, Height);
+	//if (startStream) { StreamRTSP(); }
 	TimeSinceLastImgStream = 0.0f; // Reset timer
 	streamAddress = ServerURL;
 	UE_LOG(LogTemp, Log, TEXT("Started stream at frequency of %0.2f fps and saving in %s"), 1 / StreamInterval, *ServerURL);
@@ -440,18 +445,22 @@ void AMyActor_weather::StreamRTSP()
 		
 		int32 Width = Viewport->GetSizeXY().X;
 		int32 Height = Viewport->GetSizeXY().Y;
-
+		//Streamer.Width = Width;
+		//Streamer.Height = Height;
 		// 1. Initialize Stream if not running
 		// Ensure you have an RTSP server running (like MediaMTX)
-		if (!Streamer.IsStreaming())
-		{
-			//FString ServerURL = TEXT("rtsp://localhost/mystream");
-			Streamer.StartStream(Width, Height, streamRate, streamAddress);
-		}
+		//if (!Streamer.IsStreaming())
+		//{
+		//	//FString ServerURL = TEXT("rtsp://localhost/mystream");
+		//	//Streamer.StartStream(Width, Height, streamRate, streamAddress);
+		//	Streamer.ConnectToFFmpeg();
+		//	Streamer.SendFrameTCP(Bitmap);
+		//}
 
 		// 2. Send the Raw Data
 		// IMPORTANT: Do NOT compress to PNG first. Send raw FColors.
-		Streamer.SendFrame(Bitmap);
+		//Streamer.SendFrame(Bitmap);
+		Streamer.SendFrameTCP(Bitmap);
 
 		// If you still need the file saved to disk occasionally, 
 		// you can keep your old PNG saving logic here, but don't do it every frame.

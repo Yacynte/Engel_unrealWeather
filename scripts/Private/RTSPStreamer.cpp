@@ -21,7 +21,7 @@ bool FRTSPStreamer::StartStream(int32 InWidth, int32 InHeight, int32 InFPS, FStr
 
     // IMPORTANT: Input is now rawvideo from STDIN ("-i -")
     FString Args = FString::Printf(
-        TEXT("-re -f rawvideo -pix_fmt bgra -s %dx%d -r %d -i tcp://127.0.0.1:9000 -c:v libx264 -preset ultrafast -tune zerolatency -f rtsp -rtsp_transport tcp %s"),
+        TEXT("-re -f rawvideo -pix_fmt bgra -s %dx%d -r %d -i tcp://127.0.0.1:9000 -c:v libx264 -preset ultrafast -tune zerolatency -vf \"scale=720:480\" -f rtsp -rtsp_transport tcp %s"),
         Width,
         Height,
         InFPS,
@@ -35,9 +35,9 @@ bool FRTSPStreamer::StartStream(int32 InWidth, int32 InHeight, int32 InFPS, FStr
     FFmpegProcessHandle = FPlatformProcess::CreateProc(
         *FFmpegPath,
         *Args,
-        true,   // detached
-        true,   // hidden
-        true,   // launch hidden window
+        false,   // detached
+        false,   // hidden
+        false,   // launch hidden window
         nullptr,
         0,
         nullptr,
@@ -49,6 +49,7 @@ bool FRTSPStreamer::StartStream(int32 InWidth, int32 InHeight, int32 InFPS, FStr
     {
         FPlatformProcess::ClosePipe(PipeWriteChild, PipeReadChild);
         UE_LOG(LogTemp, Error, TEXT("RTSP: Failed to launch FFmpeg."));
+        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("RTSP: Failed to launch FFmpeg."));
         return false;
     }
 
@@ -57,7 +58,7 @@ bool FRTSPStreamer::StartStream(int32 InWidth, int32 InHeight, int32 InFPS, FStr
 
     bIsStreaming = true;
     UE_LOG(LogTemp, Log, TEXT("RTSP: Streaming started to %s"), *RTSPURL);
-
+    if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("ffmpeg started"));
     return true;
 }
 
@@ -81,22 +82,54 @@ void FRTSPStreamer::SendFrame(const TArray<FColor>& Bitmap)
 
 void FRTSPStreamer::StopStream()
 {
-	if (FFmpegProcessHandle.IsValid())
-	{
-		// 1. Terminate the FFmpeg process
-		FPlatformProcess::TerminateProc(FFmpegProcessHandle);
+    // 1. Check if streaming is actually running
+    if (!bIsStreaming)
+    {
+        return;
+    }
 
-		// 2. Close the handle
-		FPlatformProcess::CloseProc(FFmpegProcessHandle);
+    UE_LOG(LogTemp, Log, TEXT("Stopping RTSP Stream..."));
 
-		// 3. Close the parent end of the pipe
-		FPlatformProcess::ClosePipe(PipeReadChild, PipeWriteChild);
+    // 2. Close the TCP Socket (Input Source)
+    if (ClientSocket)
+    {
+        // Close the socket connection. The implementation depends on your networking library (e.g., FSocket::Close)
+        ClientSocket->Close();
+        ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(ClientSocket);
+        ClientSocket = nullptr;
+    }
 
-		FFmpegProcessHandle.Reset();
-		bIsStreaming = false;
+    // 3. Terminate the External FFmpeg Process
+    if (FFmpegProcessHandle.IsValid())
+    {
+        // Use the FPlatformProcess to terminate the running FFmpeg executable.
+        // This is necessary to release the file handle and stop encoding.
+        FPlatformProcess::TerminateProc(FFmpegProcessHandle);
+        FPlatformProcess::CloseProc(FFmpegProcessHandle); // Close the handle resource
 
-		UE_LOG(LogTemp, Log, TEXT("RTSP: FFmpeg process terminated successfully."));
-	}
+        // Reset the handle pointer
+        FFmpegProcessHandle.Reset();
+    }
+
+    ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+
+    if (MetadataClientSocket)
+    {
+        MetadataClientSocket->Close();
+        SocketSubsystem->DestroySocket(MetadataClientSocket);
+        MetadataClientSocket = nullptr;
+    }
+
+    if (MetadataListenSocket)
+    {
+        MetadataListenSocket->Close();
+        SocketSubsystem->DestroySocket(MetadataListenSocket);
+        MetadataListenSocket = nullptr;
+    }
+
+    // 4. Update state flag
+    bIsStreaming = false;
+    UE_LOG(LogTemp, Log, TEXT("RTSP Stream stopped successfully."));
 }
 
 void FRTSPStreamer::SendFrameTCP(const TArray<FColor>& Bitmap)
@@ -124,7 +157,7 @@ void FRTSPStreamer::SendFrameTCP(const TArray<FColor>& Bitmap)
         }
         BytesSent += SentNow;
     }
-    if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, TEXT("Add image to stream"));
+    //if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, TEXT("Add image to stream"));
 }
 
 bool FRTSPStreamer::ConnectToFFmpeg()
@@ -156,7 +189,17 @@ bool FRTSPStreamer::StartTCPServer(int32 InWidth, int32 InHeight )
     ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
 
     ListenSocket = SocketSubsystem->CreateSocket(NAME_Stream, TEXT("FFmpegStreamSocket"), false);
-    if (!ListenSocket) return false;
+    if (!ListenSocket)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Socket creation failed."));
+        return false;
+    }
+    // (bypassing the OS's TIME_WAIT state).
+    bool bReuseAddrSuccess = ListenSocket->SetReuseAddr(true);
+    if (!bReuseAddrSuccess)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Failed to set SO_REUSEADDR option. Bind failures may occur."));
+    }
 
     int32 Port = 9000;
 
@@ -185,5 +228,91 @@ bool FRTSPStreamer::StartTCPServer(int32 InWidth, int32 InHeight )
     // Accept connection in async thread
     (new FAutoDeleteAsyncTask<FAcceptTask>(this))->StartBackgroundTask();
     bIsStreaming = true;
+    if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("TCP server started"));
     return true;
+}
+
+// FRTSPStreamer.cpp
+
+bool FRTSPStreamer::StartMetadataServer(int32 Port)
+{
+    ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+
+    // 1. Create the new listening socket
+    MetadataListenSocket = SocketSubsystem->CreateSocket(NAME_Stream, TEXT("MetadataSocket"), false);
+    if (!MetadataListenSocket) return false;
+
+    // 2. Set SO_REUSEADDR (Fixes Bind Fail on restart)
+    MetadataListenSocket->SetReuseAddr(true);
+
+    // 3. Setup Address (using the same IP as before)
+    FIPv4Address Addr;
+    FIPv4Address::Parse(TEXT("0.0.0.0"), Addr); // Assuming ip_address is a member or defined
+
+    TSharedRef<FInternetAddr> InternetAddr = SocketSubsystem->CreateInternetAddr();
+    InternetAddr->SetIp(Addr.Value);
+    InternetAddr->SetPort(Port); // Use the new port (e.g., 9001)
+
+    // 4. Bind and Listen
+    if (!MetadataListenSocket->Bind(*InternetAddr))
+    {
+        UE_LOG(LogTemp, Error, TEXT("Metadata Bind failed on port %d."), Port);
+        SocketSubsystem->DestroySocket(MetadataListenSocket);
+        MetadataListenSocket = nullptr;
+        return false;
+    }
+
+    if (!MetadataListenSocket->Listen(1))
+    {
+        UE_LOG(LogTemp, Error, TEXT("Metadata Listening failed."));
+        SocketSubsystem->DestroySocket(MetadataListenSocket);
+        MetadataListenSocket = nullptr;
+        return false;
+    }
+
+    // 5. Spawn an async task/thread to accept the connection
+    (new FAutoDeleteAsyncTask<FMetadataAcceptTask>(this))->StartBackgroundTask();
+
+    UE_LOG(LogTemp, Log, TEXT("Metadata TCP server started on port %d."), Port);
+    IsConnected = true;
+    return true;
+}
+
+
+
+void FRTSPStreamer::ReceiveMetadata()
+{
+    if (!MetadataClientSocket || !IsConnected)
+    {
+        return; // No connected client
+    }
+
+    uint32 Size;
+    while (MetadataClientSocket->HasPendingData(Size))
+    {
+        TArray<uint8> ReceivedData;
+        ReceivedData.SetNumUninitialized(FMath::Min((int32)Size, 64)); // Read up to 64 bytes
+
+        int32 BytesRead = 0;
+        MetadataClientSocket->Recv(ReceivedData.GetData(), ReceivedData.Num(), BytesRead);
+
+        if (BytesRead > 0)
+        {
+            // Convert received bytes to an FString (assuming ASCII/UTF8 format)
+            FString ReceivedString = FString(BytesRead, (char*)ReceivedData.GetData());
+            ReceivedString = ReceivedString.TrimStartAndEnd(); // Clean up whitespace
+
+            // --- PARSING LOGIC: Assuming data is sent as "Alpha,Angle" ---
+            TArray<FString> Parts;
+            if (ReceivedString.ParseIntoArray(Parts, TEXT(","), true) == 2)
+            {
+                // Convert string parts to float
+                AlphaValue = FCString::Atof(*Parts[0]);
+                AngleValue = FCString::Atof(*Parts[1]);
+
+                // Log and use the values
+                UE_LOG(LogTemp, Log, TEXT("Metadata Received: Alpha=%.2f, Angle=%.2f"), AlphaValue, AngleValue);
+            }
+        }
+    }
 }

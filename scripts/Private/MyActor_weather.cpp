@@ -58,6 +58,8 @@ void AMyActor_weather::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	Streamer.ReceiveMetadata();
+
 	if (startcaptureCalled) {
 		StartCapture(frameRate);
 	}
@@ -420,7 +422,16 @@ void AMyActor_weather::StartStreamRTSP(float InFPS, FString ServerURL)
 	if (!Viewport) return;
 	int32 Width = Viewport->GetSizeXY().X;
 	int32 Height = Viewport->GetSizeXY().Y;
-	startStream = Streamer.StartTCPServer(Width, Height);
+	FString MyWidth = FString::FromInt(Width);
+	FString MyHeight = FString::FromInt(Height);
+	FString msg = TEXT("Width and Height are ") + MyWidth + TEXT(" and ") + MyHeight;
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, msg);
+	startStream = Streamer.StartTCPServer(Width, Height)
+		&& Streamer.StartMetadataServer(9001);
+	// 2974 x 1036
+	if (startStream) {
+		startStream = Streamer.StartStream(Width, Height, InFPS, ServerURL);
+	}
 	//if (startStream) { StreamRTSP(); }
 	TimeSinceLastImgStream = 0.0f; // Reset timer
 	streamAddress = ServerURL;

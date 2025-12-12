@@ -201,19 +201,19 @@ bool FRTSPStreamer::StartTCPServer(int32 InWidth, int32 InHeight )
         UE_LOG(LogTemp, Warning, TEXT("Failed to set SO_REUSEADDR option. Bind failures may occur."));
     }
 
-    int32 Port = 9000;
+    
 
     FIPv4Address Addr;
     FIPv4Address::Parse(ip_address, Addr);
 
     TSharedRef<FInternetAddr> InternetAddr = SocketSubsystem->CreateInternetAddr();
     InternetAddr->SetIp(Addr.Value);
-    InternetAddr->SetPort(Port);
+    InternetAddr->SetPort(rstpPort);
 
     // Bind
     if (!ListenSocket->Bind(*InternetAddr))
     {
-        UE_LOG(LogTemp, Error, TEXT("Bind failed."));
+        UE_LOG(LogTemp, Error, TEXT("Bind failed on port &d."), rstpPort);
         if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Bind failed."));
         return false;
     }
@@ -234,7 +234,7 @@ bool FRTSPStreamer::StartTCPServer(int32 InWidth, int32 InHeight )
 
 // FRTSPStreamer.cpp
 
-bool FRTSPStreamer::StartMetadataServer(int32 Port)
+bool FRTSPStreamer::StartMetadataServer()
 {
     ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
 
@@ -247,16 +247,16 @@ bool FRTSPStreamer::StartMetadataServer(int32 Port)
 
     // 3. Setup Address (using the same IP as before)
     FIPv4Address Addr;
-    FIPv4Address::Parse(TEXT("0.0.0.0"), Addr); // Assuming ip_address is a member or defined
+    FIPv4Address::Parse(ip_address, Addr); // Assuming ip_address is a member or defined
 
-    TSharedRef<FInternetAddr> InternetAddr = SocketSubsystem->CreateInternetAddr();
-    InternetAddr->SetIp(Addr.Value);
-    InternetAddr->SetPort(Port); // Use the new port (e.g., 9001)
+    TSharedRef<FInternetAddr> InternetAddr1 = SocketSubsystem->CreateInternetAddr();
+    InternetAddr1->SetIp(Addr.Value);
+    InternetAddr1->SetPort(dataPort); // Use the new port (e.g., 9001)
 
     // 4. Bind and Listen
-    if (!MetadataListenSocket->Bind(*InternetAddr))
+    if (!MetadataListenSocket->Bind(*InternetAddr1))
     {
-        UE_LOG(LogTemp, Error, TEXT("Metadata Bind failed on port %d."), Port);
+        UE_LOG(LogTemp, Error, TEXT("Metadata Bind failed on port %d."), dataPort);
         SocketSubsystem->DestroySocket(MetadataListenSocket);
         MetadataListenSocket = nullptr;
         return false;
@@ -273,7 +273,7 @@ bool FRTSPStreamer::StartMetadataServer(int32 Port)
     // 5. Spawn an async task/thread to accept the connection
     (new FAutoDeleteAsyncTask<FMetadataAcceptTask>(this))->StartBackgroundTask();
 
-    UE_LOG(LogTemp, Log, TEXT("Metadata TCP server started on port %d."), Port);
+    UE_LOG(LogTemp, Log, TEXT("Metadata TCP server started on port %d."), dataPort);
     IsConnected = true;
     return true;
 }
@@ -307,11 +307,13 @@ void FRTSPStreamer::ReceiveMetadata()
             if (ReceivedString.ParseIntoArray(Parts, TEXT(","), true) == 2)
             {
                 // Convert string parts to float
-                AlphaValue = FCString::Atof(*Parts[0]);
-                AngleValue = FCString::Atof(*Parts[1]);
+                RollValue = FCString::Atof(*Parts[0]);
+                PitchValue = FCString::Atof(*Parts[1]);
 
                 // Log and use the values
-                UE_LOG(LogTemp, Log, TEXT("Metadata Received: Alpha=%.2f, Angle=%.2f"), AlphaValue, AngleValue);
+                UE_LOG(LogTemp, Log, TEXT("Metadata Received: Roll=%.2f, Pitch=%.2f"), RollValue, PitchValue);
+                FString msg = TEXT("Received Roll and Pitch: ") + ReceivedString;
+                if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, msg);
             }
         }
     }

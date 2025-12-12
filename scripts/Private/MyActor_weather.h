@@ -120,7 +120,7 @@ public:
 
 	void StopCapture();
 
-	void StartStreamRTSP( float InFPS = 30, FString ServerURL = TEXT("rtsp://localhost:8554/mystream"));
+	void StartStreamRTSP( float InFPS = 30, FString ServerURL = TEXT("rtsp://10.116.88.38:8554/mystream"));
 
 	void StreamRTSP();
 
@@ -129,6 +129,9 @@ public:
 	//void MoveObject();
 
 private:
+	int32 NewW = 720;
+	int32 NewH = 480;
+	void ResizeBitmap(const TArray<FColor>& Src, int SrcW, int SrcH, TArray<FColor>& Dst);
 	float TimeSinceLastCapture = 0.0f;
 	float CaptureInterval; // 20 fps = 0.05 seconds
 	FString ScreenshotPath;
@@ -142,6 +145,7 @@ private:
 	float TimeSinceLastImgStream = 0.0f;
 	float streamRate;
 	FString streamAddress;
+
 
 
 };

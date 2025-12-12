@@ -41,11 +41,11 @@ public:
 	FSocket* MetadataClientSocket; // The active connection
 
 	// ... existing variables ...
-	float AlphaValue;
-	float AngleValue;
+	float RollValue;
+	float PitchValue;
 
 	// New function to start the metadata listener
-	bool StartMetadataServer(int32 Port);
+	bool StartMetadataServer();
 
 	// New function to read metadata
 	void ReceiveMetadata();
@@ -60,8 +60,10 @@ private:
 	 void* PipeWriteChild;
 	 void* PipeReadChild;
 	 FSocket* Socket = nullptr;
-	 FString ip_address = TEXT("127.0.0.1");
+	 FString ip_address = TEXT("10.116.88.38");
 	 bool IsConnected = false;
+	 int32 rstpPort = 9000;
+	 int32 dataPort = 9001;
 };
 
 

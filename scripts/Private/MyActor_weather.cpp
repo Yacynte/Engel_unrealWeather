@@ -73,7 +73,7 @@ void AMyActor_weather::Tick(float DeltaTime)
 	if (startCapture) {
 		TimeSinceLastCapture += DeltaTime;
 		if (TimeSinceLastCapture >= CaptureInterval) {
-			CaptureAndSaveImage();
+			//CaptureAndSaveImage();
 			SaveActiveCameraImage();
 			TimeSinceLastCapture = 0.0f; // reset timer
 		}
@@ -353,7 +353,7 @@ void AMyActor_weather::CaptureAndSaveImage()
 	// Read pixels
 	FReadSurfaceDataFlags ReadPixelFlags(RCM_UNorm);
 	ReadPixelFlags.SetLinearToGamma(true); // Correct color
-	TArray<FColor> Bitmap;
+	TArray<FColor> Bitmap, NewBitmap;
 	RenderTarget->ReadPixels(Bitmap, ReadPixelFlags);
 
 	FIntPoint Size(Capture->TextureTarget->SizeX, Capture->TextureTarget->SizeY);
@@ -371,7 +371,8 @@ void AMyActor_weather::CaptureAndSaveImage()
 
 	// Save the image
 	TArray<uint8> PNGData;
-	FImageUtils::CompressImageArray(Size.X, Size.Y, Bitmap, PNGData);
+	AMyActor_weather::ResizeBitmap(Bitmap, Size.X, Size.Y, NewBitmap);
+	FImageUtils::CompressImageArray(Size.X, Size.Y, NewBitmap, PNGData);
 	FFileHelper::SaveArrayToFile(PNGData, *Filename);
 
 	//UE_LOG(LogTemp, Log, TEXT("Saved camera image to: %s"), *Filename);
@@ -394,7 +395,7 @@ void AMyActor_weather::StartCapture( float frameRate_)
 
 	ScreenshotPath = FPaths::ProjectSavedDir() + "/recodings_" + FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"))+"/";
 	ScreenshotPath_camera = FPaths::ProjectSavedDir() + "/recodings_camera_" + FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S")) + "/";
-	IFileManager::Get().MakeDirectory(*ScreenshotPath, true);
+	//IFileManager::Get().MakeDirectory(*ScreenshotPath, true);
 	CaptureInterval = 1 / frameRate_;
 	startCapture = true;
 	TimeSinceLastCapture = 0.0f; // Reset timer
@@ -426,8 +427,8 @@ void AMyActor_weather::StartStreamRTSP(float InFPS, FString ServerURL)
 	FString MyHeight = FString::FromInt(Height);
 	FString msg = TEXT("Width and Height are ") + MyWidth + TEXT(" and ") + MyHeight;
 	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, msg);
-	startStream = Streamer.StartTCPServer(Width, Height)
-		&& Streamer.StartMetadataServer(9001);
+	startStream = Streamer.StartTCPServer(NewW, NewH) && Streamer.StartMetadataServer();
+
 	// 2974 x 1036
 	if (startStream) {
 		startStream = Streamer.StartStream(Width, Height, InFPS, ServerURL);
@@ -435,6 +436,9 @@ void AMyActor_weather::StartStreamRTSP(float InFPS, FString ServerURL)
 	//if (startStream) { StreamRTSP(); }
 	TimeSinceLastImgStream = 0.0f; // Reset timer
 	streamAddress = ServerURL;
+	UE_LOG(LogTemp, Log, TEXT("Started stream with image of size %dx%d"), Width, Height);
+	FString Msg = FString::Printf(TEXT("Started stream with image of size %dx%d"), Width, Height);
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, Msg);
 	UE_LOG(LogTemp, Log, TEXT("Started stream at frequency of %0.2f fps and saving in %s"), 1 / StreamInterval, *ServerURL);
 	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("Started Stream "));
 	startStreamCalled = false;
@@ -448,7 +452,7 @@ void AMyActor_weather::StreamRTSP()
 	FViewport* Viewport = GEngine->GameViewport->Viewport;
 	if (!Viewport) return;
 
-	TArray<FColor> Bitmap;
+	TArray<FColor> Bitmap, NewBitmap;
 	// This is the heavy operation. Since you prefer this over SceneCapture,
 	// expect a frame drop here, but the visual quality will be perfect.
 	if (Viewport->ReadPixels(Bitmap))
@@ -456,22 +460,8 @@ void AMyActor_weather::StreamRTSP()
 		
 		int32 Width = Viewport->GetSizeXY().X;
 		int32 Height = Viewport->GetSizeXY().Y;
-		//Streamer.Width = Width;
-		//Streamer.Height = Height;
-		// 1. Initialize Stream if not running
-		// Ensure you have an RTSP server running (like MediaMTX)
-		//if (!Streamer.IsStreaming())
-		//{
-		//	//FString ServerURL = TEXT("rtsp://localhost/mystream");
-		//	//Streamer.StartStream(Width, Height, streamRate, streamAddress);
-		//	Streamer.ConnectToFFmpeg();
-		//	Streamer.SendFrameTCP(Bitmap);
-		//}
-
-		// 2. Send the Raw Data
-		// IMPORTANT: Do NOT compress to PNG first. Send raw FColors.
-		//Streamer.SendFrame(Bitmap);
-		Streamer.SendFrameTCP(Bitmap);
+		AMyActor_weather::ResizeBitmap(Bitmap, Width, Height, NewBitmap);
+		Streamer.SendFrameTCP(NewBitmap);
 
 		// If you still need the file saved to disk occasionally, 
 		// you can keep your old PNG saving logic here, but don't do it every frame.
@@ -577,7 +567,7 @@ void AMyActor_weather::SaveActiveCameraImage()
 	FViewport* Viewport = GEngine->GameViewport->Viewport;
 	if (!Viewport) return;
 
-	TArray<FColor> Bitmap;
+	TArray<FColor> Bitmap, NewBitmap;
 	if (Viewport->ReadPixels(Bitmap))
 	{
 		int32 Width = Viewport->GetSizeXY().X;
@@ -595,7 +585,29 @@ void AMyActor_weather::SaveActiveCameraImage()
 
 		// Save the image
 		TArray<uint8> PNGData;
-		FImageUtils::CompressImageArray(Width, Height, Bitmap, PNGData);
+		AMyActor_weather::ResizeBitmap(Bitmap, Width, Height, NewBitmap);
+		FImageUtils::CompressImageArray(NewW, NewH, NewBitmap, PNGData);
 		FFileHelper::SaveArrayToFile(PNGData, *Filename);
+	}
+}
+
+
+void AMyActor_weather::ResizeBitmap(const TArray<FColor>& Src, int SrcW, int SrcH, TArray<FColor>& Dst)
+{
+	Dst.SetNumUninitialized(NewW * NewH);
+
+	for (int y = 0; y < NewH; y++)
+	{
+		float SrcY = (float(y) / float(NewH)) * SrcH;
+
+		for (int x = 0; x < NewW; x++)
+		{
+			float SrcX = (float(x) / float(NewW)) * SrcW;
+
+			int X0 = FMath::Clamp(int(SrcX), 0, SrcW - 1);
+			int Y0 = FMath::Clamp(int(SrcY), 0, SrcH - 1);
+
+			Dst[y * NewW + x] = Src[Y0 * SrcW + X0];
+		}
 	}
 }

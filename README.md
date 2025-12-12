@@ -23,3 +23,17 @@ If the file do not exist, add `Visual Studio` option to your project
 7.  Copy the rest of this folder to the content browser of `EngelProject`
 
 8.  In Unreal Engine, Go to ` Project Settings > Project > Maps & Modes` select `BP_engle_GameMode` as default GameMode and `BP_engel_Blueprint` as Defaut Pawn Class
+
+`Run RTSP stream`
+
+9. Install mediaMTX and ffmpeg
+
+10. Run MediaMTX
+
+11. Build Unreal Project and launch the game
+
+12. In a terminal, run the command
+
+`ffmpeg -re -f rawvideo -pix_fmt bgra -s 720x480 -r 30 -i tcp://10.116.88.38:9000 -c:v libx264 -preset ultrafast -tune zerolatency -f rtsp -rtsp_transport tcp rtsp://localhost:8554/mystream`
+
+change the tcp and rtsp addresses as needed

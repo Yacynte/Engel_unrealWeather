@@ -10,6 +10,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
 #include "RTSPStreamer.h" 
 #include "MyActor_weather.generated.h"
 
@@ -17,6 +18,30 @@
 
 class ACharacter; // Forward declare ACharacter
 class UNiagaraComponent; // Forward declare NiagaraComponent
+
+
+UCLASS()
+class AMyCharacterBase : public ACharacter
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(BlueprintReadOnly, Category = "Camera")
+	FVector2D CamRot;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Camera")
+	bool scriptRot = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+	bool recImg_resize = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+	bool recImg = false;
+
+	void ApplyVirtualLook(const FVector2D& camRot);
+	
+
+};
 
 
 UCLASS()
@@ -68,7 +93,7 @@ public:
 
 	void CaptureAndSaveImage();
 
-	void SaveActiveCameraImage();
+	void SaveActiveCameraImage(bool keep_size = false);
 
 	void setCaptueCamera();
 
@@ -116,6 +141,10 @@ public:
 
 	void StopSnow();
 
+	void toggleRain(bool on_off = false);
+
+	void toggleSnow(bool on_off = false);
+
 	void StartCapture(float frameRate);
 
 	void StopCapture();
@@ -124,11 +153,15 @@ public:
 
 	void StreamRTSP();
 
+	void ShareRate(float DeltaTime);
+
 	//void StopStreamRTSP();
 	// Helper function to move the Camera Component
 	//void MoveObject();
 
 private:
+	float rainRate = 1000.0f; // cm/s
+	float snowRate = 500.0f;   // cm/s
 	int32 NewW = 720;
 	int32 NewH = 480;
 	void ResizeBitmap(const TArray<FColor>& Src, int SrcW, int SrcH, TArray<FColor>& Dst);
@@ -145,7 +178,5 @@ private:
 	float TimeSinceLastImgStream = 0.0f;
 	float streamRate;
 	FString streamAddress;
-
-
 
 };

@@ -49,6 +49,7 @@ void AMyActor_weather::InitializeEngel()
 		}
 	}
 
+
 	setCaptueCompParam();
 	setCaptueCamera();
 }
@@ -57,8 +58,6 @@ void AMyActor_weather::InitializeEngel()
 void AMyActor_weather::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-
-	Streamer.ReceiveMetadata();
 
 	if (startcaptureCalled) {
 		StartCapture(frameRate);
@@ -78,6 +77,15 @@ void AMyActor_weather::Tick(float DeltaTime)
 			TimeSinceLastCapture = 0.0f; // reset timer
 		}
 	}
+	AMyCharacterBase* Char = Cast<AMyCharacterBase>(TargetThirdPersonCharacter);
+	if (Char->recImg) {
+		SaveActiveCameraImage(true);
+		Char->recImg = false;
+	}
+	if (Char->recImg_resize) {
+		SaveActiveCameraImage();
+		Char->recImg_resize = false;
+	}
 
 	if (startStream) {
 		TimeSinceLastImgStream += DeltaTime;
@@ -90,6 +98,11 @@ void AMyActor_weather::Tick(float DeltaTime)
 		
 		RotateObj(DeltaTime);
 	}
+
+	if (Streamer.ReceiveMetadata()) {
+		ShareRate(DeltaTime);
+	}
+
 	
 }
 
@@ -125,7 +138,7 @@ TArray<UNiagaraComponent*> AMyActor_weather::GetWeatherComponent() const
 UNiagaraComponent* AMyActor_weather::GetRainComponent() const
 {
 	// Find the NiagaraComponent named "rain" within the CapsuleComponent's children.
-	// IMPORTANT: The name "rain" here must exactly match the name you gave the Niagara component in BP.
+	// IMPORTANT: The name "rain" here must exactly match the name of the Niagara component in BP.
 	TArray<UNiagaraComponent*> NiagaraComponents = GetWeatherComponent();
 	UNiagaraComponent* RainComponent = NULL;
 	for (UNiagaraComponent* NiagaraComp : NiagaraComponents)
@@ -560,12 +573,14 @@ void AMyActor_weather::StopSnow()
 }
 
 
-void AMyActor_weather::SaveActiveCameraImage()
+void AMyActor_weather::SaveActiveCameraImage(bool keep_size)
 {
 	if (!GEngine || !GEngine->GameViewport) return;
 
 	FViewport* Viewport = GEngine->GameViewport->Viewport;
 	if (!Viewport) return;
+
+	if (ScreenshotPath_camera.IsEmpty()) ScreenshotPath_camera = FPaths::ProjectSavedDir() + "/single_cam_rec" +  "/";
 
 	TArray<FColor> Bitmap, NewBitmap;
 	if (Viewport->ReadPixels(Bitmap))
@@ -585,8 +600,11 @@ void AMyActor_weather::SaveActiveCameraImage()
 
 		// Save the image
 		TArray<uint8> PNGData;
-		AMyActor_weather::ResizeBitmap(Bitmap, Width, Height, NewBitmap);
-		FImageUtils::CompressImageArray(NewW, NewH, NewBitmap, PNGData);
+		if (keep_size) FImageUtils::CompressImageArray(Width, Height, Bitmap, PNGData);
+		else {
+			AMyActor_weather::ResizeBitmap(Bitmap, Width, Height, NewBitmap);
+			FImageUtils::CompressImageArray(NewW, NewH, NewBitmap, PNGData);
+		}
 		FFileHelper::SaveArrayToFile(PNGData, *Filename);
 	}
 }
@@ -610,4 +628,33 @@ void AMyActor_weather::ResizeBitmap(const TArray<FColor>& Src, int SrcW, int Src
 			Dst[y * NewW + x] = Src[Y0 * SrcW + X0];
 		}
 	}
+}
+
+void AMyActor_weather::ShareRate(float DeltaTime)
+{
+	UE_LOG(LogTemp, Log, TEXT("In Share Metadata"));
+	if (TargetThirdPersonCharacter)
+	{
+		AMyCharacterBase* Char =
+			Cast<AMyCharacterBase>(TargetThirdPersonCharacter);
+
+		float FakeMouseX = Streamer.YawRate * DeltaTime;
+		float FakeMouseY = Streamer.PitchRate * DeltaTime;
+		FVector2D camRot = FVector2D(FakeMouseX, FakeMouseY);
+		if (Char)
+		{
+			Char->scriptRot = true;
+			Char->CamRot = camRot;
+			Char->ApplyVirtualLook(camRot);
+			FString Msg = FString::Printf(TEXT("Recieved camRot: %.2f, %.2f"), FakeMouseX, FakeMouseY);
+			if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, Msg);
+		}
+		else{ GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("No Char")); }
+	}
+}
+
+void AMyCharacterBase::ApplyVirtualLook(const FVector2D& camRot)
+{
+	AddControllerYawInput(camRot.X );
+	AddControllerPitchInput(camRot.Y);
 }

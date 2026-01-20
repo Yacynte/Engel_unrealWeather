@@ -56,9 +56,9 @@ void AMyActor_controllingWeather::BeginPlay()
         //WeatherManager->MoveObject();
         //GetWorldTimerManager().SetTimer(MoveToggleTimerHandle, this, &AMyActor_controllingWeather::MoveObject, 10.0f, true, 5.0f);
 		WeatherManager->StartRain(rainRate); // Start rain with precipitation rate
-        WeatherManager->StartCapture( frameRate);
-        WeatherManager->StartStreamRTSP();
-        WeatherManager->MoveForwardForDistance(400.0f, 20.0f);
+        //WeatherManager->StartCapture( frameRate);
+        //WeatherManager->StartStreamRTSP();
+        //WeatherManager->MoveForwardForDistance(400.0f, 20.0f);
        
 		//WeatherManager->StopRain(); // Stop rain
 		//WeatherManager->StopCapture();
@@ -73,14 +73,14 @@ void AMyActor_controllingWeather::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-    timediff += DeltaTime;
-    if (timediff >= 20 && timediff < 20 + DeltaTime) {
-        WeatherManager->StartSnow(snowRate);
-        WeatherManager->StopRain();
-        //WeatherManager->MoveForwardForDistance(400.0f, 20.0f);
-        FRotator ang = FRotator(0.0f, 90.0f, 0.0f);
-        WeatherManager->RotateCCW(ang, 10.f);
-    }
+    //timediff += DeltaTime;
+    //if (timediff >= 50 && timediff < 50 + DeltaTime) {
+    //    WeatherManager->StartSnow(snowRate);
+    //    WeatherManager->StopRain();
+    //    //WeatherManager->MoveForwardForDistance(400.0f, 20.0f);
+    //    //FRotator ang = FRotator(0.0f, 90.0f, 0.0f);
+    //    //WeatherManager->RotateCCW(ang, 10.f);
+    //}
 
 
 

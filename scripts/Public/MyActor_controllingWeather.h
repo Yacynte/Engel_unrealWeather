@@ -33,8 +33,8 @@ public:
 private:
 
 	// Initialize rain spawn rate
-	float rainRate = 750.0f ; // cm/s
-	float snowRate = 300.0f ;   // cm/s
+	float rainRate = 1000.0f ; // cm/s
+	float snowRate = 500.0f ;   // cm/s
 	float timediff = 0.0f ;
 	float frameRate = 10.0f;
 	bool WaitingForDestination = false; // Flag to check if waiting for destination

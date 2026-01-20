@@ -10,6 +10,7 @@ FRTSPStreamer::~FRTSPStreamer()
 	StopStream();
 }
 
+
 bool FRTSPStreamer::StartStream(int32 InWidth, int32 InHeight, int32 InFPS, FString RTSPURL)
 {
     if (bIsStreaming) return true;
@@ -280,41 +281,48 @@ bool FRTSPStreamer::StartMetadataServer()
 
 
 
-void FRTSPStreamer::ReceiveMetadata()
+bool FRTSPStreamer::ReceiveMetadata()
 {
+    //UE_LOG(LogTemp, Log, TEXT("In receive Metadata"));
     if (!MetadataClientSocket || !IsConnected)
     {
-        return; // No connected client
+        //UE_LOG(LogTemp, Log, TEXT("Receive Metadata socket not connected"));
+        //if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Metadata client socket not connected "));
+        return false; // No connected client
     }
-
+    bool recerived = false;
     uint32 Size;
     while (MetadataClientSocket->HasPendingData(Size))
     {
+        //UE_LOG(LogTemp, Log, TEXT("In receive Metadata Listen Socket"));
         TArray<uint8> ReceivedData;
         ReceivedData.SetNumUninitialized(FMath::Min((int32)Size, 64)); // Read up to 64 bytes
 
         int32 BytesRead = 0;
         MetadataClientSocket->Recv(ReceivedData.GetData(), ReceivedData.Num(), BytesRead);
-
+        //UE_LOG(LogTemp, Log, TEXT("In receive Metadata Listen Socket after BytesRead"));
         if (BytesRead > 0)
         {
             // Convert received bytes to an FString (assuming ASCII/UTF8 format)
             FString ReceivedString = FString(BytesRead, (char*)ReceivedData.GetData());
             ReceivedString = ReceivedString.TrimStartAndEnd(); // Clean up whitespace
-
+            //UE_LOG(LogTemp, Log, TEXT("receiving string... "));
             // --- PARSING LOGIC: Assuming data is sent as "Alpha,Angle" ---
             TArray<FString> Parts;
             if (ReceivedString.ParseIntoArray(Parts, TEXT(","), true) == 2)
             {
                 // Convert string parts to float
-                RollValue = FCString::Atof(*Parts[0]);
-                PitchValue = FCString::Atof(*Parts[1]);
-
+                YawRate = FCString::Atof(*Parts[0]);
+                PitchRate = FCString::Atof(*Parts[1]);
+                recerived = true;
                 // Log and use the values
-                UE_LOG(LogTemp, Log, TEXT("Metadata Received: Roll=%.2f, Pitch=%.2f"), RollValue, PitchValue);
-                FString msg = TEXT("Received Roll and Pitch: ") + ReceivedString;
-                if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, msg);
+                UE_LOG(LogTemp, Log, TEXT("Metadata Received: Yaw=%.3f , Pitch=%.3f"), YawRate, PitchRate);
+                //FString msg = TEXT("Received Roll and Pitch: ") + ReceivedString;
+                //if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, msg);
+
             }
         }
     }
+    //UE_LOG(LogTemp, Log, TEXT("out of receive Metadata"));
+    return recerived;
 }

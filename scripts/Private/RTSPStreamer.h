@@ -41,14 +41,22 @@ public:
 	FSocket* MetadataClientSocket; // The active connection
 
 	// ... existing variables ...
-	float RollValue;
-	float PitchValue;
+	float YawRate;
+	float PitchRate;
 
 	// New function to start the metadata listener
 	bool StartMetadataServer();
 
 	// New function to read metadata
-	void ReceiveMetadata();
+	bool ReceiveMetadata();
+
+	// Boolean exposed to Blueprint
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data")
+	bool bIsDetected;
+
+	// 2D Vector exposed to Blueprint
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data")
+	FVector2D ScreenPosition;
 	
 
 private:
@@ -105,13 +113,13 @@ public:
 
 	void DoWork()
 	{
-		bool Pending;
+		bool PendingData;
 		while (true)
 		{
-			if (Streamer->ListenSocket->HasPendingConnection(Pending) && Pending)
+			if (Streamer->MetadataListenSocket->HasPendingConnection(PendingData) && PendingData)
 			{
-				Streamer->ClientSocket = Streamer->ListenSocket->Accept(TEXT("FFmpegClient"));
-				if (Streamer->ClientSocket)
+				Streamer->MetadataClientSocket = Streamer->MetadataListenSocket->Accept(TEXT("FFmpegClient"));
+				if (Streamer->MetadataClientSocket)
 				{
 					UE_LOG(LogTemp, Log, TEXT("FFmpeg connected!"));
 				}

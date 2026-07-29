@@ -47,7 +47,7 @@ void AMyActor_controllingWeather::BeginPlay()
     // Example: Start a timer to toggle rain every 10 seconds after 5 seconds initial delay
     if (WeatherManager) // Only set timer if we found the weather manager
     {
-        WeatherManager->InitializeEngel();
+        //WeatherManager->InitializeEngel();
         //SetRainRate(rainSpawnRate);
         //FVector ForwardDirection = PlayerCharacter->GetActorForwardVector();
         //MoveObject(FVector::ForwardVector, 1.0f);
@@ -55,7 +55,7 @@ void AMyActor_controllingWeather::BeginPlay()
         //WeatherManager->SpeedScale = 0.01f;
         //WeatherManager->MoveObject();
         //GetWorldTimerManager().SetTimer(MoveToggleTimerHandle, this, &AMyActor_controllingWeather::MoveObject, 10.0f, true, 5.0f);
-		WeatherManager->StartRain(rainRate); // Start rain with precipitation rate
+		//WeatherManager->StartRain(rainRate); // Start rain with precipitation rate
         //WeatherManager->StartCapture( frameRate);
         //WeatherManager->StartStreamRTSP();
         //WeatherManager->MoveForwardForDistance(400.0f, 20.0f);

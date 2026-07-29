@@ -21,24 +21,19 @@ void AMyActor_weather::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Optional: If TargetThirdPersonCharacter is not set in BP, try to find the player character
-	/*
-	if (!TargetThirdPersonCharacter)
-	{
-		TargetThirdPersonCharacter = UGameplayStatics::GetPlayerCharacter(this, 0);
-		if (!TargetThirdPersonCharacter)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("MyActor_weather: Could not find player character automatically. Please set TargetThirdPersonCharacter in editor."));
-		}
-	}
-	*/
+	//StartLog();
+
 	InitializeEngel();
+
+	Capture->bCaptureEveryFrame = false;
+	Capture->bCaptureOnMovement = false;
 
 }
 
-void AMyActor_weather::InitializeEngel()
-{
+void AMyActor_weather::InitializeEngel(){
+
 	TargetThirdPersonCharacter = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0); // Get the first player character
+	
 
 	if (!TargetThirdPersonCharacter)
 	{
@@ -49,9 +44,24 @@ void AMyActor_weather::InitializeEngel()
 		}
 	}
 
-
+	//TargetThirdPersonCharacter->SetActorLocation(locationLst[index], false, nullptr, ETeleportType::TeleportPhysics);
+	//ChangeLocation();
+	AMyCharacterBase* Char = Cast<AMyCharacterBase>(TargetThirdPersonCharacter);
+	CamThirdPersonCharacter = Char->FindComponentByClass<UCameraComponent>();
 	setCaptueCompParam();
 	setCaptueCamera();
+	Streamer.StartMetadataServer();
+	StartStreamRTSP();
+
+}
+
+
+void AMyActor_weather::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+
+	Streamer.Shutdown(); // a method you add to FRTSPStreamer that does the cleanup we discussed
+
+	Super::EndPlay(EndPlayReason);
 }
 
 // Called every frame
@@ -59,32 +69,69 @@ void AMyActor_weather::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	AMyCharacterBase* Char = Cast<AMyCharacterBase>(TargetThirdPersonCharacter);
+	Streamer.ReceiveMetadata();
+	if (Char->recImg_resize || Streamer.recImg_resize) {
+		//SaveActiveCameraImage();
+		CaptureAndSaveImage();
+		Char->recImg_resize = false;
+		Streamer.recImg_resize = false;
+	}
+	if (Char->snowTog || Streamer.toggleSnow) {
+		if (!snowStarted || Streamer.startSnow) {
+			StartSnow();
+			snowStarted = true;
+		}
+		else {
+			StopSnow();
+			snowStarted = false;
+		}
+		Char->snowTog = false;
+	}
+	if (Char->rainTog || Streamer.startRain) {
+		if (!rainStarted || Streamer.toggleRain) {
+			StartRain();
+			rainStarted = true;
+		}
+		else {
+			StopRain();
+			rainStarted = false;
+		}
+		Char->rainTog = false;
+	}
+	if (Char->position) {
+		index += 1;
+		ChangeLocation(index);
+		Char->position = false;
+	}
+	if(Streamer.setlocation){ 
+		SetLocation(Streamer.targetLocation, Streamer.targetRotation, Streamer.relTargetRotator);
+		Streamer.setlocation = false;
+	}
+
+	if (Char->writeLog || Streamer.receivedData) {
+		if (!bLogFileInitialized) StartLog();
+		SaveLog(DeltaTime);
+	}
+	//if (bEnableMotionLogging) SaveLog(DeltaTime);
+	logNotification(Char);
+	if (Streamer.arrivedTarget) {
+		bLogFileInitialized = false;
+		Streamer.arrivedTarget = false;
+		//bEnableMotionLogging = false;
+	}
+
 	if (startcaptureCalled) {
 		StartCapture(frameRate);
 	}
-	if (startStreamCalled) {
-		StartStreamRTSP(streamRate);
-	}
 
-	if (Movecamera) {
-		MoveObj(DeltaTime);
-	}
 	if (startCapture) {
 		TimeSinceLastCapture += DeltaTime;
 		if (TimeSinceLastCapture >= CaptureInterval) {
-			//CaptureAndSaveImage();
+			CaptureAndSaveImage();
 			SaveActiveCameraImage();
 			TimeSinceLastCapture = 0.0f; // reset timer
 		}
-	}
-	AMyCharacterBase* Char = Cast<AMyCharacterBase>(TargetThirdPersonCharacter);
-	if (Char->recImg) {
-		SaveActiveCameraImage(true);
-		Char->recImg = false;
-	}
-	if (Char->recImg_resize) {
-		SaveActiveCameraImage();
-		Char->recImg_resize = false;
 	}
 
 	if (startStream) {
@@ -94,17 +141,46 @@ void AMyActor_weather::Tick(float DeltaTime)
 			TimeSinceLastImgStream = 0.0f; // reset stream timer
 		}
 	}
-	if (RotateCamera) {
-		
-		RotateObj(DeltaTime);
-	}
 
-	if (Streamer.ReceiveMetadata()) {
-		ShareRate(DeltaTime);
+	if (startStreamCalled) {
+		if (Streamer.receivedData) {
+			ShareRate(DeltaTime);
+			//Streamer.receivedData = false;
+			//MoveObj(DeltaTime);
+			//RotateObj(DeltaTime);
+		}
 	}
-
 	
 }
+
+
+void AMyActor_weather::StartLog() {
+	if (bLogFileInitialized) return;
+	IntAsString = FString::FromInt(logPose);
+	LogFilePath = FPaths::ProjectSavedDir() + "/MotionLog/"  + "MotionLog_" + IntAsString + "_" + FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S")) + ".csv";
+	//LogFilePath = FPaths::ProjectSavedDir() + "/MotionLog/" + "GT_" + IntAsString + "_MotionLog_" + FDateTime::Now().ToString(TEXT(" % Y % m % d_ % H % M % S")) + ".csv";
+	//LogFilePath = FPaths::ProjectSavedDir() / FileName;
+	// Write CSV header
+	const FString Header = TEXT("Time,DeltaTime,PosX,PosY,PosZ,Pitch,Yaw,Roll,PitchCam,YawCam,RollCam\n");
+	FFileHelper::SaveStringToFile(Header, *LogFilePath, FFileHelper::EEncodingOptions::AutoDetect, &IFileManager::Get(), FILEWRITE_None);
+
+	bLogFileInitialized = true;
+	logPose += 1;
+	//bEnableMotionLogging = true;
+	UE_LOG(LogTemp, Log, TEXT("Motion logging started: %s"), *LogFilePath);
+}
+
+void AMyActor_weather::logNotification(AMyCharacterBase* Char) {
+	if (GEngine)
+	{
+		const FString Text = (Char->writeLog || Streamer.receivedData) ? TEXT("LOG: ON") : TEXT("LOG: OFF");
+		const FColor Color = (Char->writeLog || Streamer.receivedData) ? FColor::Green : FColor::Red;
+		// Use a constant key so it overwrites the same line
+		GEngine->AddOnScreenDebugMessage(9001, 0.f, Color, Text);
+	}
+	if (!(Char->writeLog || Streamer.receivedData)) bLogFileInitialized = false;
+}
+
 
 TArray<UNiagaraComponent*> AMyActor_weather::GetWeatherComponent() const
 {
@@ -185,6 +261,21 @@ UNiagaraComponent* AMyActor_weather::GetSnowComponent() const
 	}
 
 	return SnowComponent;
+}
+
+void AMyActor_weather::ChangeLocation(int targetIndex)
+{
+	TargetThirdPersonCharacter->SetActorLocation(locationLst[targetIndex], false, nullptr, ETeleportType::TeleportPhysics);
+}
+
+void AMyActor_weather::SetLocation(const FVector& targetLocation, const FRotator& targetRotation, const FRotator& relTargetRotator)
+{
+	TargetThirdPersonCharacter->SetActorLocation(targetLocation, false, nullptr, ETeleportType::TeleportPhysics);
+	if (Streamer.useTargetRotation) {
+		TargetThirdPersonCharacter->SetActorRotation(targetRotation.Quaternion());
+		CaptureSourceCamera->SetRelativeRotation(relTargetRotator.Quaternion());
+		Streamer.useTargetRotation = false;
+	}
 }
 
 void AMyActor_weather::ActivateRain()
@@ -272,12 +363,19 @@ void AMyActor_weather::MoveObj(float DeltaTime)
 {
 	FVector CurrentLocation = TargetThirdPersonCharacter->GetActorLocation();
 	FVector Direction = (TargetLocation - CurrentLocation).GetSafeNormal();
+	FVector NewLocation;
+	if (Movecamera) {
+		float Step = MoveSpeed * DeltaTime;
+		NewLocation = CurrentLocation + Direction * Step;
+	}
 
-	float Step = MoveSpeed * DeltaTime;
-	FVector NewLocation = CurrentLocation + Direction * Step;
-
+	else {
+		NewLocation = CurrentLocation + Streamer.velocity * DeltaTime;
+	}
+	
+	UE_LOG(LogTemp, Log, TEXT("NewLocation: X=%.3f , Y=%.3f , Z=%.3f "), NewLocation.X, NewLocation.Y, NewLocation.Z);
 	// Stop if we’re close enough or overshot
-	if (FVector::DistSquared(NewLocation, StartLocation) >= FVector::DistSquared(TargetLocation, StartLocation))
+	if (FVector::DistSquared(NewLocation, StartLocation) >= FVector::DistSquared(TargetLocation, StartLocation) && Movecamera)
 	{
 		NewLocation = TargetLocation;
 		Movecamera = false;
@@ -292,8 +390,13 @@ void AMyActor_weather::RotateObj(float DeltaTime)
 {
 	//UE_LOG(LogTemp, Log, TEXT("Rotate camera!"));
 	FRotator CurrentRotator = TargetThirdPersonCharacter->GetActorRotation();
-
-	float AngularStep = AngularSpeed * DeltaTime;
+	float AngularStep;
+	if (RotateCamera) {
+		AngularStep = AngularSpeed * DeltaTime;
+	}
+	else {
+		AngularStep = Streamer.YawRate_drone * DeltaTime;
+	}
 	FRotator NewRotator = CurrentRotator;
 
 	if (CurrentRotator.Pitch < TargetRotator.Pitch) {
@@ -309,7 +412,7 @@ void AMyActor_weather::RotateObj(float DeltaTime)
 	}
 
 	// Stop if we’re close enough or overshot
-	if (NewRotator.GetManhattanDistance(StartRotator) >= TargetRotator.GetManhattanDistance(StartRotator))
+	if (NewRotator.GetManhattanDistance(StartRotator) >= TargetRotator.GetManhattanDistance(StartRotator) && RotateCamera)
 	{
 		NewRotator = TargetRotator;
 		RotateCamera = false;
@@ -320,19 +423,90 @@ void AMyActor_weather::RotateObj(float DeltaTime)
 	TargetThirdPersonCharacter->SetActorRotation(NewRotator.Quaternion());
 }
 
+//void AMyActor_weather::setCaptueCompParam()
+//{
+//	//UE_LOG(LogTemp, Log, TEXT("Capture and Save Image."));
+//
+//	if (!TargetThirdPersonCharacter) return;
+//
+//	Capture = TargetThirdPersonCharacter->FindComponentByClass<USceneCaptureComponent2D>();
+//
+//	if (!Capture || !Capture->TextureTarget) {
+//		UE_LOG(LogTemp, Error, TEXT("Capture or TextureTarget is null"));
+//		return;
+//	}
+//}
+
+
+
+UCameraComponent* FindCameraByTag(AActor* Owner, FName Tag)
+{
+	if (!Owner) return nullptr;
+
+	TArray<UActorComponent*> Components;
+	Owner->GetComponents(UCameraComponent::StaticClass(), Components);
+
+	for (UActorComponent* Comp : Components)
+	{
+		if (UCameraComponent* Cam = Cast<UCameraComponent>(Comp))
+		{
+			if (Cam->ComponentHasTag(Tag))
+				return Cam;
+		}
+	}
+	return nullptr;
+}
+
+
+
 void AMyActor_weather::setCaptueCompParam()
 {
-	//UE_LOG(LogTemp, Log, TEXT("Capture and Save Image."));
-
 	if (!TargetThirdPersonCharacter) return;
 
 	Capture = TargetThirdPersonCharacter->FindComponentByClass<USceneCaptureComponent2D>();
 
-	if (!Capture || !Capture->TextureTarget) {
+	APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+	if (!(PC && PC->PlayerCameraManager)) return;
+
+	FVector CamLoc = PC->PlayerCameraManager->GetCameraLocation();
+	FRotator CamRot = PC->PlayerCameraManager->GetCameraRotation();
+
+	UE_LOG(LogTemp, Log, TEXT("Active Camera Location: %s, Rotation: %s"),
+		*CamLoc.ToString(), *CamRot.ToString());
+
+	PC->GetPlayerViewPoint(CamLoc, CamRot);
+	
+
+	if (!Capture || !Capture->TextureTarget)
+	{
 		UE_LOG(LogTemp, Error, TEXT("Capture or TextureTarget is null"));
 		return;
 	}
+
+	CaptureSourceCamera = FindCameraByTag(TargetThirdPersonCharacter, TEXT("CaptureSource"));
+
+	if (!CaptureSourceCamera)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CaptureSourceCamera NOT FOUND. Did you tag Camera_A?"));
+		return;
+	}
+
+
+	// Lock capture to Camera_B forever
+	Capture->AttachToComponent(
+		CaptureSourceCamera,
+		FAttachmentTransformRules::SnapToTargetNotIncludingScale
+	);
+	Capture->SetRelativeLocation(FVector::ZeroVector);
+	Capture->SetRelativeRotation(FRotator::ZeroRotator);
+	Capture->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
+
+
+	// Optional: match camera FOV
+	//Capture->FOVAngle = CaptureSourceCamera->FieldOfView;
 }
+
+
 
 void AMyActor_weather::setCaptueCamera() {
 
@@ -344,6 +518,7 @@ void AMyActor_weather::setCaptueCamera() {
 
 		UE_LOG(LogTemp, Log, TEXT("Active Camera Location: %s, Rotation: %s"),
 			*CamLoc.ToString(), *CamRot.ToString());
+		PC->GetPlayerViewPoint(CamLoc, CamRot);
 	}
 
 }
@@ -364,10 +539,10 @@ void AMyActor_weather::CaptureAndSaveImage()
 	}
 
 	// Read pixels
-	FReadSurfaceDataFlags ReadPixelFlags(RCM_UNorm);
-	ReadPixelFlags.SetLinearToGamma(true); // Correct color
+	//FReadSurfaceDataFlags ReadPixelFlags(RCM_UNorm);
+	//ReadPixelFlags.SetLinearToGamma(true); // Correct color
 	TArray<FColor> Bitmap, NewBitmap;
-	RenderTarget->ReadPixels(Bitmap, ReadPixelFlags);
+	RenderTarget->ReadPixels(Bitmap);
 
 	FIntPoint Size(Capture->TextureTarget->SizeX, Capture->TextureTarget->SizeY);
 
@@ -375,17 +550,18 @@ void AMyActor_weather::CaptureAndSaveImage()
 		UE_LOG(LogTemp, Error, TEXT("No pixels captured."));
 		return;
 	}
-
+	if (ScreenshotPath.IsEmpty()) ScreenshotPath = FPaths::ProjectSavedDir() + "/single_cam_rec" + "/";
 	// Create screenshot folder
 	//FString ScreenshotPath = FPaths::ProjectSavedDir() + "/recodings_" + FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"))+"/";
 	//IFileManager::Get().MakeDirectory(*ScreenshotPath, true);
-
-	FString Filename = ScreenshotPath + "Capture_" + FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S")) + ".png";
+	//FString IntAsString = FString::FromInt(logPose);
+	//LogFilePath = FPaths::ProjectSavedDir() + "/MotionLog/" + "GT" + IntAsString + "_MotionLog_" + FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S")) + ".csv";
+	FString Filename = ScreenshotPath + "GT" + IntAsString + "_Capture_" + FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S")) + ".png";
 
 	// Save the image
 	TArray<uint8> PNGData;
-	AMyActor_weather::ResizeBitmap(Bitmap, Size.X, Size.Y, NewBitmap);
-	FImageUtils::CompressImageArray(Size.X, Size.Y, NewBitmap, PNGData);
+	//AMyActor_weather::ResizeBitmap(Bitmap, Size.X, Size.Y, NewBitmap);#
+	FImageUtils::CompressImageArray(Size.X, Size.Y, Bitmap, PNGData);
 	FFileHelper::SaveArrayToFile(PNGData, *Filename);
 
 	//UE_LOG(LogTemp, Log, TEXT("Saved camera image to: %s"), *Filename);
@@ -424,7 +600,7 @@ void AMyActor_weather::StartStreamRTSP(float InFPS, FString ServerURL)
 	if (!Capture || !Capture->TextureTarget) {
 		UE_LOG(LogTemp, Error, TEXT("Capture or TextureTarget is null"));
 		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Capture or TextureTarget is null!"));
-		startStreamCalled = true;
+		startStreamCalled = false;
 		streamRate = InFPS;
 		return;
 	}
@@ -432,21 +608,25 @@ void AMyActor_weather::StartStreamRTSP(float InFPS, FString ServerURL)
 	// Start streaming at a targeted frame rate
 	StreamInterval = 1 / InFPS;
 	streamRate = InFPS;
-	FViewport* Viewport = GEngine->GameViewport->Viewport;
-	if (!Viewport) return;
-	int32 Width = Viewport->GetSizeXY().X;
-	int32 Height = Viewport->GetSizeXY().Y;
+	//FViewport* Viewport = GEngine->GameViewport->Viewport;
+	//if (!Viewport) return;
+	//int32 Width = Viewport->GetSizeXY().X;
+	//int32 Height = Viewport->GetSizeXY().Y;
+	int32 Width = Capture->TextureTarget->SizeX;
+	int32 Height = Capture->TextureTarget->SizeY;
 	FString MyWidth = FString::FromInt(Width);
 	FString MyHeight = FString::FromInt(Height);
 	FString msg = TEXT("Width and Height are ") + MyWidth + TEXT(" and ") + MyHeight;
 	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, msg);
-	startStream = Streamer.StartTCPServer(NewW, NewH) && Streamer.StartMetadataServer();
-
+	startStream = Streamer.StartTCPServer(Width, Height); // && Streamer.StartMetadataServer();
+	//Streamer.StartUDPServer();
+	startStream = true;
 	// 2974 x 1036
-	if (startStream) {
-		startStream = Streamer.StartStream(Width, Height, InFPS, ServerURL);
-	}
+	//if (startStream) {
+	//	startStream = Streamer.StartStream(Width, Height, InFPS, ServerURL);
+	//}
 	//if (startStream) { StreamRTSP(); }
+
 	TimeSinceLastImgStream = 0.0f; // Reset timer
 	streamAddress = ServerURL;
 	UE_LOG(LogTemp, Log, TEXT("Started stream with image of size %dx%d"), Width, Height);
@@ -454,7 +634,7 @@ void AMyActor_weather::StartStreamRTSP(float InFPS, FString ServerURL)
 	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, Msg);
 	UE_LOG(LogTemp, Log, TEXT("Started stream at frequency of %0.2f fps and saving in %s"), 1 / StreamInterval, *ServerURL);
 	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("Started Stream "));
-	startStreamCalled = false;
+	startStreamCalled = true;
 }
 
 
@@ -462,19 +642,44 @@ void AMyActor_weather::StreamRTSP()
 {
 	if (!GEngine || !GEngine->GameViewport) return;
 
-	FViewport* Viewport = GEngine->GameViewport->Viewport;
-	if (!Viewport) return;
+	//FViewport* Viewport = GEngine->GameViewport->Viewport;
+	//if (!Viewport) return;
 
-	TArray<FColor> Bitmap, NewBitmap;
+	//TArray<FColor> Bitmap, NewBitmap;
 	// This is the heavy operation. Since you prefer this over SceneCapture,
 	// expect a frame drop here, but the visual quality will be perfect.
-	if (Viewport->ReadPixels(Bitmap))
-	{
+
+
+	// Force the capture
+	Capture->CaptureScene();
+
+
+	// Get render target resource
+	FRenderTarget* RenderTarget = Capture->TextureTarget->GameThread_GetRenderTargetResource();
+	if (!RenderTarget) {
+		UE_LOG(LogTemp, Error, TEXT("RenderTarget is null"));
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("RenderTarget is null "));
+		return;
+	}
+
+	// Read pixels
+	//FReadSurfaceDataFlags ReadPixelFlags(RCM_UNorm);
+	//ReadPixelFlags.SetLinearToGamma(true); // Correct color
+	TArray<FColor> Bitmap, NewBitmap;
+	RenderTarget->ReadPixels(Bitmap);
+
+	FIntPoint Size(Capture->TextureTarget->SizeX, Capture->TextureTarget->SizeY);
+
+	//if (Viewport->ReadPixels(Bitmap))
+	//{
+	if (Bitmap.Num() >= 0) {
 		
-		int32 Width = Viewport->GetSizeXY().X;
-		int32 Height = Viewport->GetSizeXY().Y;
-		AMyActor_weather::ResizeBitmap(Bitmap, Width, Height, NewBitmap);
-		Streamer.SendFrameTCP(NewBitmap);
+		//int32 Width = Viewport->GetSizeXY().X;
+		//int32 Height = Viewport->GetSizeXY().Y;
+		int32 Width = Size.X;
+		int32 Height = Size.Y;
+		//AMyActor_weather::ResizeBitmap(Bitmap, Width, Height, NewBitmap);
+		Streamer.SendFrameTCP(Bitmap);
 
 		// If you still need the file saved to disk occasionally, 
 		// you can keep your old PNG saving logic here, but don't do it every frame.
@@ -530,6 +735,7 @@ void AMyActor_weather::StopRain()
 	UE_LOG(LogTemp, Log, TEXT("Stopping rain..."));
 	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Rain deactivated from script"));
 }
+
 
 void AMyActor_weather::StartSnow(float SnowRate, FVector WindSpeed )
 {
@@ -630,31 +836,120 @@ void AMyActor_weather::ResizeBitmap(const TArray<FColor>& Src, int SrcW, int Src
 	}
 }
 
+//void AMyActor_weather::ShareRate(float DeltaTime)
+//{
+//	UE_LOG(LogTemp, Log, TEXT("In Share Metadata"));
+//	if (TargetThirdPersonCharacter)
+//	{
+//		AMyCharacterBase* Char =
+//			Cast<AMyCharacterBase>(TargetThirdPersonCharacter);
+//
+//		float FakeMouseX = Streamer.YawRate_cam * DeltaTime;
+//		float FakeMouseY = Streamer.PitchRate_cam * DeltaTime;
+//		FVector2D camRot = FVector2D(FakeMouseX, FakeMouseY);
+//		if (Char)
+//		{
+//			Char->scriptRot = true;
+//			Char->CamRot = camRot;
+//			Char->ApplyVirtualLook(camRot);
+//			FString Msg = FString::Printf(TEXT("Recieved camRot: %.2f, %.2f"), Streamer.YawRate_cam, Streamer.PitchRate_cam);
+//			if (GEngine) GEngine->AddOnScreenDebugMessage(42, 5.f, FColor::Green, Msg);
+//		}
+//		else{ GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("No Char")); }
+//	}
+//}
+
+
 void AMyActor_weather::ShareRate(float DeltaTime)
 {
 	UE_LOG(LogTemp, Log, TEXT("In Share Metadata"));
-	if (TargetThirdPersonCharacter)
-	{
-		AMyCharacterBase* Char =
-			Cast<AMyCharacterBase>(TargetThirdPersonCharacter);
 
-		float FakeMouseX = Streamer.YawRate * DeltaTime;
-		float FakeMouseY = Streamer.PitchRate * DeltaTime;
-		FVector2D camRot = FVector2D(FakeMouseX, FakeMouseY);
-		if (Char)
-		{
-			Char->scriptRot = true;
-			Char->CamRot = camRot;
-			Char->ApplyVirtualLook(camRot);
-			FString Msg = FString::Printf(TEXT("Recieved camRot: %.2f, %.2f"), FakeMouseX, FakeMouseY);
-			if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, Msg);
+	if (TargetThirdPersonCharacter) {
+		FVector CurrentLocation = TargetThirdPersonCharacter->GetActorLocation();
+		FVector position = Streamer.velocity * DeltaTime;
+		FVector NewLocation = CurrentLocation + position;
+
+		UE_LOG(LogTemp, Log, TEXT("New Location: X=%.3f , Y=%.3f , Z=%.3f "), NewLocation.X, NewLocation.Y, NewLocation.Z);
+		UE_LOG(LogTemp, Log, TEXT("Rel Position: X=%.3f , Y=%.3f , Z=%.3f "), position.X, position.Y, position.Z);
+		FString Msg = FString::Printf(TEXT("Rel Position: X=%.3f , Y=%.3f , Z=%.3f "), position.X, position.Y, position.Z);
+		if (GEngine) GEngine->AddOnScreenDebugMessage(2, 5.f, FColor::Green, Msg);
+		Msg = FString::Printf(TEXT("New Position: X=%.3f , Y=%.3f , Z=%.3f "), NewLocation.X, NewLocation.Y, NewLocation.Z);
+		if (GEngine) GEngine->AddOnScreenDebugMessage(20, 5.f, FColor::Green, Msg);
+
+		//TargetThirdPersonCharacter->SetActorLocation(NewLocation);
+		//TargetThirdPersonCharacter->AddActorWorldOffset(position, true);
+		TargetThirdPersonCharacter->AddActorLocalOffset(position, true);
+
+		//UE_LOG(LogTemp, Log, TEXT("Rotate camera!"));
+		FRotator CurrentRotator = TargetThirdPersonCharacter->GetActorRotation();
+		FRotator angle = Streamer.angularRate * DeltaTime;
+		FRotator NewRotator = CurrentRotator + angle;
+		Msg = FString::Printf(TEXT("RelRot: Roll=%.3f , Pitch=%.3f , Yaw=%.3f "), angle.Roll, angle.Pitch, angle.Yaw);
+		if (GEngine) GEngine->AddOnScreenDebugMessage(35, 5.f, FColor::Green, Msg);
+		Msg = FString::Printf(TEXT("CurrentRotator: Roll=%.3f , Pitch=%.3f , Yaw=%.3f "), CurrentRotator.Roll, CurrentRotator.Pitch, CurrentRotator.Yaw);
+		if (GEngine) GEngine->AddOnScreenDebugMessage(33, 5.f, FColor::Green, Msg);
+
+		if (Streamer.gimCam) {
+			//CaptureSourceCamera->AddRelativeRotation(angle);
+			//const FRotator CamRel = CaptureSourceCamera->GetRelativeRotation();
+			FRotator camRot = CaptureSourceCamera->GetRelativeRotation();
+			FRotator newCamRot = camRot + angle;
+			CaptureSourceCamera->SetRelativeRotation(newCamRot.Quaternion());
+			Msg = FString::Printf(TEXT(" NewRot Gim: Roll=%.3f , Pitch=%.3f , Yaw=%.3f "), newCamRot.Roll, newCamRot.Pitch, newCamRot.Yaw);
+			if (GEngine) GEngine->AddOnScreenDebugMessage(32, 5.f, FColor::Green, Msg);
+			
+			//UE_LOG(LogTemp, Log, TEXT("Camera_A RelRot: "), *CamRel.ToString());
+			//Msg = TEXT("Camera_A RelRot: %s") + CamRel.ToString();
+			//if (GEngine) GEngine->AddOnScreenDebugMessage(42, 5.f, FColor::Green, Msg);
 		}
-		else{ GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("No Char")); }
+		else {
+			TargetThirdPersonCharacter->SetActorRotation(NewRotator.Quaternion());
+			Msg = FString::Printf(TEXT("NewRot: Roll=%.3f , Pitch=%.3f , Yaw=%.3f"), NewRotator.Roll, NewRotator.Pitch, NewRotator.Yaw);
+			if (GEngine) GEngine->AddOnScreenDebugMessage(42, 5.f, FColor::Green, Msg);
+		}
+		//UE_LOG(LogTemp, Log, TEXT("Rel Rotation: Roll=%.3f , Pitch=%.3f , Yaw=%.3f "), angle.Roll, angle.Pitch, angle.Yaw);
+			
+		
+		
 	}
+}
+
+
+void AMyActor_weather::SaveLog(float DeltaTime) {
+	if ( !bLogFileInitialized || !TargetThirdPersonCharacter)
+		return;
+
+	const float Time = GetWorld()->GetTimeSeconds();
+	const FVector Pos = TargetThirdPersonCharacter->GetActorLocation();
+	const FRotator Rot = TargetThirdPersonCharacter->GetActorRotation();
+	const FRotator RotCam = CaptureSourceCamera->GetRelativeRotation();
+	//const FVector Pos = CamThirdPersonCharacter->GetComponentLocation();
+	//const FRotator Rot = CamThirdPersonCharacter->GetComponentRotation();
+
+
+	const FString Line = FString::Printf(
+		TEXT("%.6f,%.6f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n"),
+		Time,
+		DeltaTime,
+		Pos.X, Pos.Y, Pos.Z,
+		Rot.Pitch, Rot.Yaw, Rot.Roll,
+		RotCam.Pitch, RotCam.Yaw, RotCam.Roll
+	);
+
+	FFileHelper::SaveStringToFile(
+		Line,
+		*LogFilePath,
+		FFileHelper::EEncodingOptions::AutoDetect,
+		&IFileManager::Get(),
+		FILEWRITE_Append
+	);
+
 }
 
 void AMyCharacterBase::ApplyVirtualLook(const FVector2D& camRot)
 {
-	AddControllerYawInput(camRot.X );
+	AddControllerYawInput(camRot.X);
 	AddControllerPitchInput(camRot.Y);
 }
+
+

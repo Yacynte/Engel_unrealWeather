@@ -7,6 +7,14 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "HighResScreenshot.h"
 #include "ImageUtils.h" // Needed for FImageUtils::CreateBitmap
+#include "GameFramework/SpringArmComponent.h"
+#include "Camera/CameraComponent.h"
+
+
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "HAL/FileManager.h"
+#include "Misc/DateTime.h"
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -33,13 +41,21 @@ public:
 	bool scriptRot = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
-	bool recImg_resize = false;
+	bool writeLog = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
-	bool recImg = false;
+	bool recImg_resize = false;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+	bool stream_rtsp = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+	bool rainTog = false;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+	bool snowTog = false;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+	bool position = false;
 
 	void ApplyVirtualLook(const FVector2D& camRot);
-	
 
 };
 
@@ -56,6 +72,7 @@ public:
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 
 public:	
@@ -66,12 +83,17 @@ public:
 
 	void RotateCCW(FRotator angle, float angularSpeed);
 
+	void logNotification(AMyCharacterBase* Char);
+	void StartLog();
+
 	/** Reference to the Third Person Character in the world.
 	 * Set this in the Blueprint editor after placing MyActor_weather,
 	 * or find it dynamically in BeginPlay.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
 	ACharacter* TargetThirdPersonCharacter; // Or AMyThirdPersonCharacter* if you have one
+	UCameraComponent* CamThirdPersonCharacter;
+	
 
 	//FVector CameraDirection;
 	//float SpeedScale;
@@ -81,7 +103,7 @@ public:
 	FVector StartLocation;
 	FRotator  StartRotator;
 	FRotator TargetRotator;
-	FVector TargetLocation;
+	FVector TargetLocation = FVector(0.0f, 0.0f, 0.0f);
 	float MoveSpeed;
 	float AngularSpeed;
 	//float frameRate;
@@ -90,6 +112,8 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Camera")
 	USceneCaptureComponent2D* Capture;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture")
+	UCameraComponent* CaptureSourceCamera = nullptr;
 
 	void CaptureAndSaveImage();
 
@@ -133,11 +157,11 @@ public:
 
 	void RotateObj(float DeltaTime);
 
-	void StartRain(float Rainrate, FVector RaingSpeed = FVector(0.0f, 0.0f, 0.0f));
+	void StartRain(float Rainrate = 1000.0f, FVector RaingSpeed = FVector(0.0f, 0.0f, 0.0f));
 
 	void StopRain();
 
-	void StartSnow(float SnowRate, FVector SnowSpeed = FVector(0.0f, 0.0f, 0.0f));
+	void StartSnow(float SnowRate = 500.0f, FVector SnowSpeed = FVector(0.0f, 0.0f, 0.0f));
 
 	void StopSnow();
 
@@ -155,14 +179,19 @@ public:
 
 	void ShareRate(float DeltaTime);
 
+	void SaveLog(float DeltaTime);
+
+	void ChangeLocation(int index = 0);
+	void SetLocation(const FVector& targetLocation, const FRotator& targetRotation, const FRotator& relTargetRotator);
+
 	//void StopStreamRTSP();
 	// Helper function to move the Camera Component
 	//void MoveObject();
 
 private:
-	float rainRate = 1000.0f; // cm/s
-	float snowRate = 500.0f;   // cm/s
-	int32 NewW = 720;
+	bool rainStarted = false;
+	bool snowStarted = false;
+	int32 NewW = 640;
 	int32 NewH = 480;
 	void ResizeBitmap(const TArray<FColor>& Src, int SrcW, int SrcH, TArray<FColor>& Dst);
 	float TimeSinceLastCapture = 0.0f;
@@ -179,4 +208,14 @@ private:
 	float streamRate;
 	FString streamAddress;
 
+	bool bEnableMotionLogging = false;
+
+	FString LogFilePath;
+	bool bLogFileInitialized = false;
+
+	// Header file or local variable
+	TArray<FVector> locationLst;
+	int index = 0;
+	int logPose = 1;
+	FString IntAsString = "1";
 };
